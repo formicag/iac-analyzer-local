@@ -1,0 +1,16 @@
+{
+  "name": "iac-analyzer-local",
+  "version": "1.0.0",
+  "description": "Local Well-Architected IaC Analyzer - runs entirely on Mac with Ollama",
+  "private": true,
+  "scripts": {
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "build": "npm run build:frontend && npm run build:backend",
+    "start": "cd backend && npm start",
+    "dev": "cd backend && npm run start:dev",
+    "setup": "node backend/dist/setup.js",
+    "start:prod": "node backend/dist/main.js"
+  }
+}
