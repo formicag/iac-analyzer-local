@@ -1,14 +1,14 @@
 node_modules/
 dist/
 .env
+.env.*
 *.db
 *.db-journal
 .DS_Store
 coverage/
 frontend/dist/
 backend/dist/
-# Keep data/wellarchitected_best_practices.json (tracked)
-# but ignore any runtime data
 chromadb/
-wafr-docs/pdfs/
-wafr-docs/chunks/
+wafr-docs/
+*.log
+.playwright-mcp/
