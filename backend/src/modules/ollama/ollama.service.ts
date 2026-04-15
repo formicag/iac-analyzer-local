@@ -51,8 +51,9 @@ export class OllamaService {
       messages,
       stream: false,
       options: {
-        temperature: options?.temperature ?? 0.7,
+        temperature: options?.temperature ?? 0.4, // Lower temp for more reliable JSON
         num_ctx: options?.numCtx ?? 32768,
+        top_p: 0.9,
       },
     };
 

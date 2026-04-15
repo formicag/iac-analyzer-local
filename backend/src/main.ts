@@ -21,8 +21,16 @@ async function findAvailablePort(startPort = 3000): Promise<number> {
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // Enable CORS for dev
-  app.enableCors({ origin: '*' });
+  // CORS: only allow localhost origins
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+        callback(null, true);
+      } else {
+        callback(new Error('CORS not allowed'));
+      }
+    },
+  });
 
   // API prefix
   app.setGlobalPrefix('api', {

@@ -2,8 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../../config/config.service';
 import { DatabaseService } from '../database/database.service';
 import { createHash } from 'crypto';
-import { join } from 'path';
+import { join, basename } from 'path';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, rmSync } from 'fs';
+
+function safeName(name: string): string {
+  return basename(name).replace(/[^\w.\-() ]/g, '_').substring(0, 255);
+}
 
 @Injectable()
 export class StorageService {
@@ -58,9 +62,9 @@ export class StorageService {
     files: Array<{ originalname: string; mimetype: string; buffer: Buffer }>,
     uploadMode: string,
   ): Promise<{ fileId: string }> {
-    // Combine all file content for a unique ID
-    const combined = Buffer.concat(files.map(f => f.buffer));
-    const fileId = this.createFileId(combined);
+    // Create ID from individual file hashes (avoids concatenating large buffers)
+    const hashInput = files.map(f => this.createFileId(f.buffer)).join(':');
+    const fileId = this.createFileId(hashInput);
     const fileDir = join(this.config.uploadsDir, fileId);
     mkdirSync(fileDir, { recursive: true });
 
@@ -77,7 +81,7 @@ export class StorageService {
         files: pdfData,
       }));
       files.forEach((f, i) => {
-        writeFileSync(join(fileDir, `pdf_${i}_${f.originalname}`), f.buffer);
+        writeFileSync(join(fileDir, `pdf_${i}_${safeName(f.originalname)}`), f.buffer);
       });
     } else {
       // Pack content into a single string for projects

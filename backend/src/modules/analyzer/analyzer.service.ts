@@ -125,8 +125,19 @@ export class AnalyzerService {
       userPrompt = Prompts.buildPrompt(question, kbContexts, undefined, undefined, fileContent);
     }
 
+    // Gemma 4 optimization: add explicit JSON formatting reminder
+    const gemmaJsonReminder = `
+
+CRITICAL OUTPUT RULES:
+- You MUST respond ONLY with a JSON object wrapped in <json_response> tags.
+- Do NOT include any text before or after the <json_response> tags.
+- Ensure the JSON is valid - properly escape quotes and special characters.
+- Every best practice in the list MUST appear in your response, do not skip any.`;
+
+    const optimizedSystemPrompt = systemPrompt + gemmaJsonReminder;
+
     const messages: OllamaMessage[] = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: optimizedSystemPrompt },
       { role: 'user', content: userPrompt },
     ];
 

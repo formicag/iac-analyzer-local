@@ -1,4 +1,4 @@
-import { AppLayout, ContentLayout, Header, TopNavigation, HelpPanel } from '@cloudscape-design/components';
+import { AppLayout, ContentLayout, Header, TopNavigation, HelpPanel, Link } from '@cloudscape-design/components';
 import { WellArchitectedAnalyzer } from './components/WellArchitectedAnalyzer';
 import { HelpPanelProvider, useHelpPanel } from './contexts/HelpPanelContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -6,6 +6,7 @@ import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 import { useUserMenuUtilities } from './components/UserMenu';
 import { useHelpContent } from './components/utils/help-content';
 import { HelpButton } from './components/utils/HelpButton';
+import { AboutPage } from './components/AboutPage';
 
 import { WorkSideNavigation, WorkSideNavigationRef } from './components/WorkSideNavigation';
 import '@cloudscape-design/global-styles/index.css';
@@ -18,6 +19,7 @@ function AppContent() {
   const { isToolsOpen, content, setIsToolsOpen } = useHelpPanel();
   const { authState } = useAuth();
   const { strings, language: currentLanguage, setLanguage, supportedLanguages } = useLanguage();
+  const [showAbout, setShowAbout] = useState(false);
   const helpContent = useHelpContent();
   const defaultContent = helpContent.default;
   const userMenuUtilities = useUserMenuUtilities();
@@ -106,22 +108,34 @@ function AppContent() {
       <TopNavigation
         identity={{
           href: '#',
-          title: strings.app.title,
+          title: 'IaC Analyzer',
           logo: {
-            src: "/aws-wa-logo.png",
-            alt: "Well-Architected"
-          }
+            src: "/colibri-logo.png",
+            alt: "Colibri Digital"
+          },
+          onFollow: (e) => { e.preventDefault(); setShowAbout(false); }
         }}
         utilities={[
-          ...userMenuUtilities,
+          {
+            type: 'button',
+            text: 'About',
+            onClick: () => setShowAbout(!showAbout),
+          },
+          {
+            type: 'button',
+            text: 'GitHub',
+            href: 'https://github.com/formicag/iac-analyzer-local',
+            external: true,
+            externalIconAriaLabel: 'Opens in new tab',
+          },
           {
             type: 'menu-dropdown',
             iconName: 'settings',
-            ariaLabel: strings.settings.title,
+            ariaLabel: strings.settings?.title || 'Settings',
             items: [
               {
                 id: 'language-section',
-                text: strings.language.title,
+                text: strings.language?.title || 'Language',
                 items: languageItems
               }
             ],
@@ -137,20 +151,25 @@ function AppContent() {
       <ChatProvider fileId={activeFileId} lensName={activeLensName} lensAliasArn={activeLensAliasArn}>
         <AppLayout
           content={
-            <ContentLayout
-              header={
-                <Header
-                  variant="h3"
-                  info={<HelpButton contentId="default" />}
-                >
-                  {strings.app.subtitle}
-                </Header>
-              }
-            >
-              <div data-testid="well-architected-analyzer" key="analyzer">
-                <WellArchitectedAnalyzer onWorkItemsRefreshNeeded={handleWorkItemsRefresh} onAnalysisStart={handleAnalysisStart} onCurrentLensResultsSelection={handleCurrentLensResultsSelection} />
-              </div>
-            </ContentLayout>
+            showAbout ? (
+              <AboutPage onClose={() => setShowAbout(false)} />
+            ) : (
+              <ContentLayout
+                header={
+                  <Header
+                    variant="h3"
+                    info={<HelpButton contentId="default" />}
+                    description="A Colibri Digital refactored version of the AWS Well-Architected IaC Analyzer"
+                  >
+                    Well-Architected IaC Analyzer
+                  </Header>
+                }
+              >
+                <div data-testid="well-architected-analyzer" key="analyzer">
+                  <WellArchitectedAnalyzer onWorkItemsRefreshNeeded={handleWorkItemsRefresh} onAnalysisStart={handleAnalysisStart} onCurrentLensResultsSelection={handleCurrentLensResultsSelection} />
+                </div>
+              </ContentLayout>
+            )
           }
           navigation={authState.isAuthenticated ? (
             <WorkSideNavigation

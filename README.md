@@ -1,83 +1,115 @@
-# Well-Architected IaC Analyzer - Local Edition
+# IaC Analyzer Local
 
-A fully local version of the [AWS Well-Architected IaC Analyzer](https://github.com/aws-samples/well-architected-iac-analyzer) that runs entirely on your Mac using Ollama. No AWS account required.
+**By [Colibri Digital](https://github.com/formicag)** — A fully local refactored version of the [AWS Well-Architected IaC Analyzer](https://github.com/aws-samples/well-architected-iac-analyzer).
 
-Upload your Terraform, CloudFormation, or CDK templates and get a full Well-Architected Framework Review with best practice analysis across all 6 pillars.
-
-## Prerequisites
-
-- **Node.js** v18+
-- **Ollama** ([install](https://ollama.com/download))
+Upload your Terraform, CloudFormation, or CDK templates and get automated Well-Architected Framework Reviews across all 6 pillars — entirely on your Mac, with no AWS account required.
 
 ## Quick Start
 
 ```bash
-# 1. Clone the repo
+# 1. Clone
 git clone https://github.com/formicag/iac-analyzer-local.git
 cd iac-analyzer-local
 
-# 2. Pull required Ollama models
+# 2. Pull models
 ollama pull gemma4
 ollama pull nomic-embed-text
 
-# 3. Run setup (installs deps, builds, downloads WAFR docs)
+# 3. Setup (installs deps, builds, downloads WAFR docs)
 ./setup.sh
 
-# 4. Start the app
+# 4. Start
 npm start
 ```
 
-The app opens automatically in your browser.
+The app opens in your browser automatically.
+
+## Prerequisites
+
+- **Node.js** v18+ ([install](https://nodejs.org/))
+- **Ollama** ([install](https://ollama.com/download))
 
 ## What It Does
 
-- **IaC Analysis**: Upload CloudFormation, Terraform, or CDK templates for automated WAFR review
-- **6 Pillar Coverage**: Security, Reliability, Performance Efficiency, Cost Optimization, Operational Excellence, Sustainability
-- **308 Best Practices**: Evaluates against the full Well-Architected best practices catalog
-- **RAG-Enhanced**: Uses embedded WAFR whitepapers for context-aware analysis
-- **Interactive Chat**: Ask follow-up questions about your analysis results
-- **IaC Generation**: Generate improved templates based on recommendations
-- **CSV Export**: Export analysis results for reporting
-- **Architecture Diagrams**: Upload PNG/JPEG architecture diagrams for review
-- **Multi-file Support**: Analyze ZIP archives or multiple files at once
+- **WAFR Review**: Evaluates IaC templates against 308 AWS Well-Architected best practices
+- **6 Pillars**: Security, Reliability, Performance Efficiency, Cost Optimization, Operational Excellence, Sustainability
+- **Multiple Formats**: Terraform (.tf), CloudFormation (.yaml/.json), CDK, architecture diagrams (PNG/JPEG), PDFs, ZIP archives
+- **RAG-Enhanced**: Embeds WAFR whitepapers into a local vector store for context-aware analysis
+- **Interactive Chat**: Ask follow-up questions about your results
+- **IaC Generation**: Get improved templates based on recommendations
+- **CSV Export**: Export results for reporting
+- **100% Local**: No data leaves your machine
 
 ## Architecture
 
-Single NestJS process serving everything on one dynamically-assigned port:
+This is a complete rewrite of the AWS version. Every cloud service replaced with a local equivalent:
 
-| Component | Implementation |
-|---|---|
-| LLM | Ollama + Gemma 4 |
-| Embeddings | Ollama + nomic-embed-text |
-| Knowledge Base | File-based vector store with cosine similarity |
-| Database | SQLite (better-sqlite3) |
-| File Storage | Local filesystem (`~/.iac-analyzer/`) |
-| Frontend | React + Cloudscape Design System |
-| Real-time | Socket.io WebSocket |
+| Component | AWS Original | Our Local Version |
+|---|---|---|
+| LLM | Bedrock (Claude) | Ollama + Gemma 4 |
+| Embeddings | Titan (1024d) | nomic-embed-text (768d) |
+| Knowledge Base | Bedrock KB + S3 Vectors | File-based vector store |
+| Database | DynamoDB | SQLite |
+| File Storage | S3 | Local filesystem |
+| Auth | Cognito/OIDC | Removed |
+| Hosting | ECS Fargate + ALB (3 containers) | Single NestJS process |
+
+See the **About** page in the app for detailed rationale behind each choice.
 
 ## Configuration
 
-Set environment variables before starting:
-
 ```bash
-OLLAMA_URL=http://localhost:11434   # Ollama server URL
+OLLAMA_URL=http://localhost:11434   # Ollama server
 OLLAMA_MODEL=gemma4                  # LLM model
 OLLAMA_EMBED_MODEL=nomic-embed-text  # Embedding model
-PORT=3000                            # Starting port (auto-increments if busy)
-BATCH_SIZE=3                         # Parallel analysis questions
+PORT=3000                            # Starting port (auto-increments)
+BATCH_SIZE=1                         # Questions analyzed in parallel
+```
+
+## Project Structure
+
+```
+├── backend/              # NestJS API + WebSocket server
+│   └── src/
+│       ├── modules/
+│       │   ├── analyzer/     # Core WAFR analysis engine
+│       │   ├── storage/      # File upload + SQLite persistence
+│       │   ├── ollama/       # Ollama LLM integration
+│       │   ├── knowledge-base/ # Vector store for WAFR docs
+│       │   └── database/     # SQLite service
+│       └── prompts/          # LLM prompt templates
+├── frontend/             # React + Cloudscape Design System
+│   └── src/
+│       ├── components/       # UI components
+│       ├── services/         # API + WebSocket clients
+│       └── hooks/            # Analysis state management
+├── data/                 # WAFR best practices (308 practices)
+├── test-fixtures/        # Sample IaC files for testing
+├── setup.sh              # One-command installer
+└── DESIGN.md             # Architecture specification
 ```
 
 ## Data Storage
 
-All data is stored locally in `~/.iac-analyzer/`:
+All data lives in `~/.iac-analyzer/`:
 
 ```
 ~/.iac-analyzer/
-├── data.db          # SQLite database
-├── uploads/         # Uploaded files
-├── chromadb/        # Vector embeddings
-└── wafr-docs/       # Downloaded WAFR whitepapers
+├── data.db        # SQLite database
+├── uploads/       # Uploaded files
+├── chromadb/      # Vector embeddings (vectors.json)
+└── wafr-docs/     # Downloaded WAFR whitepapers
 ```
+
+## Test Fixtures
+
+The `test-fixtures/` directory contains sample Terraform files with intentional issues:
+
+- `sample-terraform.tf` — Basic infra with obvious security issues (open SSH, hardcoded passwords)
+- `sample-cloudformation.yaml` — CloudFormation with similar security gaps
+- `ecommerce-platform.tf` — E-commerce setup with subtle issues across all 6 pillars
+- `data-pipeline.tf` — Analytics pipeline testing Cost/Sustainability/OpEx
+- `microservices-cluster.tf` — ECS cluster testing Reliability/Performance/OpEx
 
 ## License
 
