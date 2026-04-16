@@ -125,8 +125,19 @@ export class AnalyzerService {
       userPrompt = Prompts.buildPrompt(question, kbContexts, undefined, undefined, fileContent);
     }
 
-    // Gemma 4 optimization: add explicit JSON formatting reminder
+    // Gemma 4 optimization: stricter assessment + JSON formatting
     const gemmaJsonReminder = `
+
+CRITICAL ASSESSMENT RULES:
+1. Be STRICT when determining "applied". A best practice is ONLY "applied" if it is FULLY and COMPLETELY implemented, not partially.
+2. If the code has a basic construct but is MISSING complementary services, monitoring, or security controls that the best practice requires, mark it as "applied": false.
+3. Pay close attention to code COMMENTS that say "Gap:", "TODO:", or "not configured" — these are explicit acknowledgements of missing implementations. If a gap comment exists for a practice, it is NOT applied.
+4. Having a resource DEFINED is not the same as having a best practice APPLIED. For example:
+   - Setting encryption on RDS but NOT on EBS volumes = "Enforce encryption at rest" is NOT fully applied
+   - Having a CPU alarm with NO alarm actions (no SNS topic) = "Collect metrics" is NOT fully applied
+   - Using IaC (CDK/Terraform) alone does NOT mean "Automate security controls" is applied — you need actual security automation services (Config rules, GuardDuty, Inspector, etc.)
+   - Having security groups does NOT mean "Automate compute protection" is applied — you need vulnerability scanning, patch management, etc.
+5. When in doubt, mark as "applied": false with a recommendation. It is better to flag a potential gap than to miss it.
 
 CRITICAL OUTPUT RULES:
 - You MUST respond ONLY with a JSON object wrapped in <json_response> tags.
