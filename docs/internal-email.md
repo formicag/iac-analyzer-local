@@ -6,9 +6,17 @@ I wanted to share a tool I've put together that gives us free, unlimited Well-Ar
 
 ## What is it?
 
-AWS published an open-source project called the **[Well-Architected IaC Analyzer](https://github.com/aws-samples/well-architected-iac-analyzer)** (MIT-0 license, free to use and modify). It takes your Terraform, CloudFormation, or CDK templates and automatically reviews them against the full AWS Well-Architected Framework — all 308 best practices across the 6 pillars (Security, Reliability, Performance Efficiency, Cost Optimization, Operational Excellence, Sustainability).
+AWS published an open-source project called the **[Well-Architected IaC Analyzer](https://github.com/aws-samples/well-architected-iac-analyzer)** (MIT-0 license, free to use and modify, actively maintained — 265 commits in 2025, last updated 10 April 2026). It takes your Terraform, CloudFormation, or CDK templates and automatically reviews them against the full AWS Well-Architected Framework — all 308 best practices across the 6 pillars (Security, Reliability, Performance Efficiency, Cost Optimization, Operational Excellence, Sustainability).
+
+Here's the original AWS version running a Security pillar review on a CDK file:
+
+![AWS IaC Analyzer running a Security review](screenshots/04-aws-version-analysis.png)
 
 The AWS version runs on Bedrock (Claude), ECS Fargate, DynamoDB, S3, Cognito, and a Bedrock Knowledge Base. It's a great tool, but it costs roughly **$80/day** to run in AWS, and requires Bedrock model access which isn't available on our partner account.
+
+And here's our local Colibri Digital version — same functionality, zero AWS costs:
+
+![Local IaC Analyzer - Colibri Digital version](screenshots/01-home-screen.png)
 
 ## What I did
 
@@ -59,6 +67,21 @@ I tested the local version with Gemma 4 against several Terraform files with int
 - Missing VPC flow logs, no WAF, no IMDSv2 enforcement
 
 All 12 specific issues I planted were caught. The recommendations are detailed and actionable, with specific Terraform modifications suggested.
+
+I also deployed the full AWS version to compare results side by side:
+
+| | **AWS (Claude Sonnet 4.6)** | **Local (Gemma 4)** |
+|---|---|---|
+| Speed (Security pillar) | ~10 minutes | ~33 minutes |
+| Best practices reviewed | 63 | 63 |
+| Applied | 5 | 2 |
+| Not Applied | 44 | 36 |
+| **Agreement rate** | — | **93%** |
+| Cost per analysis | ~$0.30 | $0 |
+
+93% of assessments were identical. The 4 disagreements were judgment calls where Gemma 4 was stricter (flagging partial implementations that Claude accepted). For a review tool, stricter is arguably better.
+
+See the full comparison report in `docs/COMPARISON_REPORT.md`.
 
 ## Platform compatibility
 
