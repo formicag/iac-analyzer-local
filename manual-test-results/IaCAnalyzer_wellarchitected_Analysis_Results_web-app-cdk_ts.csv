@@ -1,0 +1,1011 @@
+"Pillar","Question","Best Practice","Relevant","Applied","Reason","Recommendations"
+"Security","How do you securely operate your workload?","Separate workloads using accounts","Yes","No","[From Template] The template deploys a single 'WebAppStack' targeting one region ('eu-west-2') with no reference to AWS Organizations,separate accounts for environments (dev/staging/prod),Control Tower,SCPs,or any multi-account strategy. All components — ALB,ECS Fargate,RDS,and S3 — are co-located within a single account and stack.","**Risk**:Deploying all workload components in a single account increases the blast radius of a security incident. A compromised IAM principal or misconfiguration could affect all environments and sensitive data simultaneously,and environment-specific security policies cannot be enforced effectively.
+
+**Recommendations**:
+1. **AWS Organizations**:Establish a multi-account structure with separate accounts for production,staging,and development. Production accounts should have stricter SCPs that prevent disabling security services like CloudTrail or GuardDuty.
+2. **AWS Control Tower**:Deploy a well-governed landing zone with pre-configured guardrails and Account Factory for standardized account provisioning.
+3. **Service Control Policies (SCPs)**:Apply SCPs at the OU level to enforce minimum security baselines (e.g.,deny disabling encryption,deny creating unencrypted S3 buckets).
+4. **Dedicated shared services accounts**:Create separate accounts for centralized logging,security tooling,and networking (e.g.,a dedicated 'Security' account aggregating CloudTrail and GuardDuty findings).
+5. **Example structure**:Create OUs such as `Production`,`Non-Production`,and `Shared-Services`. The Production OU SCP should include deny rules for actions like `cloudtrail:StopLogging` and `guardduty:DeleteDetector`."
+"Security","How do you securely operate your workload?","Secure account root user and properties","Yes","No","[From Template] The CDK template does not configure Amazon GuardDuty (which detects `RootCredentialUsage` findings) or CloudWatch alarms to alert on root user activity via CloudTrail events. No controls related to root user monitoring or protection are present anywhere in the template.","**Risk**:Unmonitored root account access exposes the AWS account to complete compromise. Without MFA,root credentials obtained through phishing or credential stuffing grant unrestricted access to all resources,and without alerting,such access can go undetected.
+
+**Recommendations**:
+1. **Enable GuardDuty via CDK**:Add a `CfnDetector` resource in the CDK stack to enable GuardDuty,which automatically generates `Policy:IAMUser/RootCredentialUsage` findings when the root user is used.
+2. **CloudWatch Alarm for root activity**:Create a CloudTrail-based metric filter and CloudWatch alarm to detect any API calls made by the root user:
+ - Create a metric filter on the CloudTrail log group using `$.userIdentity.type = ""Root""`
+ - Attach an SNS topic alarm notification for any root usage.
+3. **Account-level controls (outside CDK)**:Enable hardware MFA on the root user,delete any root access keys,and implement a two-person rule for root access procedures.
+4. **AWS Control Tower guardrails**:If adopting Control Tower,enable the strongly recommended control 'Disallow creation of root access keys' and 'Require MFA for root user'."
+"Security","How do you securely operate your workload?","Identify and validate control objectives","Yes","No","[From Template] The template does not configure AWS Config rules,AWS Security Hub,conformance packs,SCPs,or any automated compliance monitoring services. There is no mechanism to detect or report on misconfigurations — such as the hardcoded credentials or unencrypted HTTP listener — against defined control objectives.","**Risk**:Without automated compliance validation,security misconfigurations (such as the plaintext credentials and HTTP-only listener observed in this template) can persist undetected,leading to regulatory violations,audit failures,and data breaches.
+
+**Recommendations**:
+1. **AWS Security Hub**:Enable Security Hub with the AWS Foundational Security Best Practices (FSBP) standard and CIS AWS Foundations Benchmark. This will automatically flag issues such as exposed credentials,unencrypted endpoints,and missing logging. Add via CDK using `securityhub.CfnHub`.
+2. **AWS Config Rules**:Deploy managed Config rules relevant to this workload:
+ - `rds-instance-public-access-check`:Verify RDS is not publicly accessible.
+ - `alb-http-to-https-redirection-check`:Detect HTTP-only listeners (directly applicable to the gap identified in this template).
+ - `s3-bucket-logging-enabled`:Enforce S3 access logging.
+3. **AWS Config Conformance Packs**:Deploy the `Operational-Best-Practices-for-Amazon-RDS` conformance pack for the RDS instance.
+4. **Automated reporting**:Use Security Hub findings aggregated into a central security account and configure EventBridge rules to trigger alerts on CRITICAL or HIGH findings."
+"Security","How do you securely operate your workload?","Stay up to date with security threats and recommendations","No","No","",""
+"Security","How do you securely operate your workload?","Identify and prioritize risks using a threat model","No","No","",""
+"Security","How do you securely operate your workload?","Reduce security management scope","Yes","Yes","[From Template] The template extensively uses AWS managed services:Amazon RDS PostgreSQL for the database,ECS Fargate for serverless container orchestration (no EC2 fleet management required),Application Load Balancer for managed load balancing,and Amazon S3 for object storage. This approach significantly offloads infrastructure-level security patching and management to AWS under the shared responsibility model.",""
+"Security","How do you securely operate your workload?","Automate deployment of standard security controls","Yes","No","[From Template] While the template uses AWS CDK (IaC,a positive signal),critical standard security controls are absent from the automated deployment:database credentials are hardcoded as plaintext instead of using Secrets Manager,no WAF WebACL is attached to the ALB,the HTTP listener lacks HTTPS enforcement,VPC flow logs are explicitly commented out,and no GuardDuty,Security Hub,or CloudFormation Guard validation is present.","**Risk**:Manually applied or missing security controls create inconsistent security posture across deployments. Hardcoded credentials enable credential theft; lack of WAF exposes the application to OWASP Top 10 attacks; HTTP-only traffic enables man-in-the-middle attacks; absence of VPC flow logs removes network-level visibility for incident response.
+
+**Recommendations**:
+1. **Secrets Manager for credentials**:Replace `rds.Credentials.fromPassword('admin',cdk.SecretValue.plainText(...))` with `rds.Credentials.fromGeneratedSecret('admin')`. Pass the secret ARN to the container via `secrets` (not `environment`) in the task definition to prevent exposure in plaintext environment variables.
+2. **AWS WAF WebACL**:Associate an `aws-waf-v2` WebACL with the ALB using the AWS CDK WAFv2 construct and attach the AWS Managed Rules (e.g.,`AWSManagedRulesCommonRuleSet`,`AWSManagedRulesKnownBadInputsRuleSet`).
+3. **HTTPS enforcement**:Add an HTTPS listener on port 443 with an ACM certificate (`acm.Certificate`) and add an HTTP-to-HTTPS redirect rule on the port 80 listener instead of forwarding traffic directly.
+4. **VPC Flow Logs**:Uncomment and enable the flow log:`vpc.addFlowLog('FlowLog',{destination:ec2.FlowLogDestination.toCloudWatchLogs()})`.
+5. **CloudFormation Guard in CI/CD**:Add a pre-deployment validation step using `cfn-guard` with rules that reject templates containing plaintext secrets or HTTP-only listeners,ensuring the pipeline rejects non-compliant deployments before they reach production.
+6. **GuardDuty**:Add a `guardduty.CfnDetector` to enable threat detection for the account."
+"Security","How do you securely operate your workload?","Evaluate and implement new security services and features regularly","No","No","",""
+"Security","How do you manage identities for people and machines?","Use strong sign-in mechanisms","Yes","No","[From Template] The application exposes an HTTP endpoint via the ALB with no authentication layer configured. There is no Amazon Cognito user pool,IAM Identity Center configuration,MFA enforcement,or any other sign-in mechanism present. The ALB listener is configured on port 80 using plain HTTP with no restriction on who can access the application.","**Risk**:Without strong sign-in mechanisms,the application is accessible to anyone on the internet without authentication,increasing the risk of unauthorized access,data exposure,and account compromise.
+
+**Recommendations**:
+1. **Add Amazon Cognito User Pool**:Integrate an Amazon Cognito User Pool to manage application user authentication with adaptive authentication and MFA enforcement:
+```typescript
+const userPool = new cognito.UserPool(this,'UserPool',{
+ mfa:cognito.Mfa.REQUIRED,
+ mfaSecondFactor:{sms:false,otp:true},
+ passwordPolicy:{minLength:12,requireSymbols:true},
+ advancedSecurityMode:cognito.AdvancedSecurityMode.ENFORCED,
+});
+```
+2. **Add HTTPS with Cognito on ALB**:Replace the HTTP listener with HTTPS (port 443) and attach a Cognito authorizer to the ALB listener to require authenticated sessions before reaching the application.
+3. **Enable HTTPS redirect**:Add a redirect rule on port 80 to forward all traffic to port 443.
+4. **Use AWS Verified Access** for internal admin interfaces to verify user identity and device posture before granting access.
+5. **Enable MFA** for all AWS account users managing this infrastructure,enforced via IAM policy conditions (`aws:MultiFactorAuthPresent`)."
+"Security","How do you manage identities for people and machines?","Use temporary credentials","Yes","No","[From Template] No explicit IAM task role is defined for the ECS FargateTaskDefinition to access AWS resources (e.g.,the S3 bucket). More critically,the application authenticates to RDS using hardcoded static credentials passed as plain-text environment variables rather than using IAM database authentication backed by the task's IAM role,which would have provided temporary,automatically-rotated credentials.","**Risk**:Without explicit use of temporary credentials and IAM roles,the application relies on long-term static secrets that can be stolen,leaked,and do not expire automatically,dramatically increasing the blast radius of a compromise.
+
+**Recommendations**:
+1. **Define an explicit ECS Task Role** with least-privilege permissions:
+```typescript
+const taskRole = new iam.Role(this,'TaskRole',{
+ assumedBy:new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+});
+bucket.grantReadWrite(taskRole);
+const taskDef = new ecs.FargateTaskDefinition(this,'TaskDef',{
+ taskRole,
+ memoryLimitMiB:1024,
+ cpu:512,
+});
+```
+2. **Enable IAM Database Authentication for RDS** to allow the ECS task role to authenticate to PostgreSQL using short-lived IAM tokens instead of static passwords:
+```typescript
+const database = new rds.DatabaseInstance(this,'Database',{
+ iamAuthentication:true,
+ // ... other props
+});
+database.grantConnect(taskRole);
+```
+3. **Remove all static credential environment variables** (`DB_PASS`) from the container definition and instead use the task role to retrieve secrets from Secrets Manager at runtime.
+4. **Use Secrets Manager with IAM access**:grant the task role `secretsmanager:GetSecretValue` permission on the specific secret ARN only."
+"Security","How do you manage identities for people and machines?","Store and use secrets securely","Yes","No","[From Template] The RDS database is created with `rds.Credentials.fromPassword('admin',cdk.SecretValue.plainText('Pr0duction_Pass!'))`,embedding a plaintext password directly in the CDK code. The same password is repeated as a plain-text container environment variable `DB_PASS:'Pr0duction_Pass!'`. This is a critical security violation exposing credentials in source code and the CDK/CloudFormation template.","**Risk**:Hardcoded credentials in source code and IaC templates are frequently committed to version control,exposed in CloudFormation stack outputs,or visible in ECS task definition history. This is one of the leading causes of cloud security breaches and can result in unauthorized database access and data exfiltration.
+
+**Recommendations**:
+1. **Use AWS Secrets Manager for RDS credentials** with automatic rotation:
+```typescript
+const database = new rds.DatabaseInstance(this,'Database',{
+ credentials:rds.Credentials.fromGeneratedSecret('admin',{
+ secretName:'prod/webapp/db-credentials',
+}),
+ // ... other props
+});
+```
+This auto-generates a strong password and stores it in Secrets Manager.
+
+2. **Inject secrets into ECS containers via Secrets Manager** instead of plain-text environment variables:
+```typescript
+const dbSecret = database.secret!;
+taskDef.addContainer('App',{
+ secrets:{
+ DB_PASS:ecs.Secret.fromSecretsManager(dbSecret,'password'),
+ DB_USER:ecs.Secret.fromSecretsManager(dbSecret,'username'),
+},
+ // remove environment DB_PASS and DB_USER
+});
+```
+3. **Grant the task execution role access** to the secret:`dbSecret.grantRead(taskDef.executionRole!)`.
+4. **Scan your codebase** using Amazon CodeGuru or `git-secrets` to detect and prevent future secret commits.
+5. **Enable Secrets Manager rotation** for the database secret using the RDS rotation Lambda integration."
+"Security","How do you manage identities for people and machines?","Rely on a centralized identity provider","Yes","No","[From Template] The template contains no configuration for a centralized identity provider. There is no AWS IAM Identity Center,SAML 2.0 federation,Amazon Cognito integration,or any IdP-based access control for either the application's users or infrastructure administrators. Administrative access patterns are entirely undefined.","**Risk**:Without a centralized identity provider,teams resort to managing individual IAM users per account,leading to credential sprawl,inconsistent access controls,and difficulty auditing who has access to what. User offboarding becomes error-prone and slow,leaving residual access after employees depart.
+
+**Recommendations**:
+1. **Use AWS IAM Identity Center** for workforce identity management across the organization. Integrate it with your existing corporate IdP (e.g.,Azure AD,Okta) via SAML 2.0 and SCIM for automated provisioning/deprovisioning:
+ - Configure permission sets aligned to job functions (e.g.,Developer,Operator,ReadOnly)
+ - Assign permission sets to groups synced from your IdP
+ - Enforce MFA at the IAM Identity Center level
+
+2. **Use Amazon Cognito for application user identities**:Create a User Pool to serve as the centralized IdP for application end-users and integrate it with the ALB:
+```typescript
+const userPool = new cognito.UserPool(this,'AppUserPool',{
+ selfSignUpEnabled:false,
+ signInAliases:{email:true},
+});
+const userPoolClient = userPool.addClient('AlbClient');
+listener.addAction('CognitoAuth',{
+ action:new elbv2actions.AuthenticateCognitoAction({userPool,...}),
+});
+```
+3. **Avoid creating individual IAM users** in the account; instead rely on federated roles assumed through the centralized IdP."
+"Security","How do you manage identities for people and machines?","Audit and rotate credentials periodically","Yes","No","[From Template] The template defines static,hardcoded RDS credentials and container environment variable passwords with no rotation mechanism. There is no AWS Secrets Manager rotation configuration,no CloudWatch alarms for credential anomalies,no GuardDuty,no Config Rules,and no IAM Access Analyzer configured to audit credential usage or detect stale credentials.","**Risk**:Long-lived static credentials that are never rotated significantly increase the window of opportunity for exploitation following a credential leak. Without auditing,compromised credentials may go undetected for extended periods.
+
+**Recommendations**:
+1. **Enable automatic credential rotation** in Secrets Manager for the RDS database credentials:
+```typescript
+const secret = new secretsmanager.Secret(this,'DbSecret',{
+ generateSecretString:{excludeCharacters:'/@"" '},
+});
+// Attach rotation
+secret.addRotationSchedule('Rotation',{
+ automaticallyAfter:cdk.Duration.days(30),
+ hostedRotation:secretsmanager.HostedRotation.postgreSqlSingleUser(),
+});
+```
+2. **Enable Amazon GuardDuty** at the account level to detect anomalous credential usage,such as API calls from unexpected geographic locations or credential exfiltration attempts.
+3. **Enable AWS Config Rules** such as `iam-user-no-policies-check` and `access-keys-rotated` to detect long-lived credentials.
+4. **Use IAM Access Analyzer** to continuously audit IAM policies and flag unused permissions or public resource exposure.
+5. **Add CloudWatch alarms** on Secrets Manager API events via CloudTrail to detect unexpected secret access patterns.
+6. **Generate and review IAM Credential Reports** regularly to identify unused access keys and enforce the 90-day rotation policy for any remaining long-term credentials."
+"Security","How do you manage identities for people and machines?","Employ user groups and attributes","Yes","No","[From Template] The template defines no IAM groups,IAM Identity Center permission sets,Attribute-Based Access Control (ABAC) policies,or any group-level access management constructs. No IAM roles are explicitly defined with scoped policies for different user functions,and no user attribute tagging strategy is visible.","**Risk**:Managing permissions at the individual user level causes policy sprawl,inconsistency,and difficulty enforcing least privilege at scale. It becomes hard to audit who has what permissions and to update access when employees change roles.
+
+**Recommendations**:
+1. **Define IAM Identity Center Permission Sets** per job function aligned to this workload:
+ - `WebAppDeveloper`:Read-only on ECS,CloudWatch Logs access
+ - `WebAppOperator`:ECS deploy,Secrets Manager read
+ - `WebAppAdmin`:Full stack management with MFA condition
+
+2. **Implement ABAC using IAM tags**. Tag ECS tasks and S3 buckets with environment and project attributes,and write IAM policies that evaluate these tags:
+```typescript
+bucket.addToResourcePolicy(new iam.PolicyStatement({
+ actions:['s3:GetObject'],
+ principals:[new iam.ArnPrincipal('arn:aws:iam::ACCOUNT:role/DevRole')],
+ conditions:{
+ StringEquals:{'aws:ResourceTag/Project':'WebApp'},
+},
+}));
+```
+3. **Synchronize group memberships from your corporate IdP** to IAM Identity Center via SCIM to ensure that AWS access is automatically revoked when users change roles or leave the organization.
+4. **Apply IAM Permission Boundaries** to all roles created by this workload to limit maximum achievable permissions regardless of attached policies."
+"Security","How do you manage permissions for people and machines?","Define access requirements","Yes","No","[From Template] Database credentials are hardcoded using `rds.Credentials.fromPassword('admin',cdk.SecretValue.plainText('Pr0duction_Pass!'))`,and the plaintext password is also injected directly into the container environment variable `DB_PASS`. No AWS Secrets Manager integration is used. The `FargateTaskDefinition` does not explicitly define a `taskRole`,meaning no formal access requirements have been defined for what the application workload can access.","**Risk**:Hardcoded credentials expose the application to credential leakage through code repositories,logs,or environment variable inspection. The absence of defined access requirements means the workload may have more permissions than needed.
+
+**Recommendations**:
+
+1. **Use AWS Secrets Manager for database credentials**:Replace `rds.Credentials.fromPassword(...)` with `rds.Credentials.fromGeneratedSecret('admin')`,which automatically creates and stores credentials in Secrets Manager. Example:
+```typescript
+credentials:rds.Credentials.fromGeneratedSecret('admin',{
+ secretName:'webapp/db-credentials'
+})
+```
+
+2. **Inject secrets into containers securely**:Instead of plaintext environment variables,use ECS Secrets integration to pull from Secrets Manager at task startup:
+```typescript
+secrets:{
+ DB_PASS:ecs.Secret.fromSecretsManager(database.secret!)
+}
+```
+
+3. **Define an explicit ECS task role**:Create an IAM role for the task with only the permissions the application genuinely needs (e.g.,read access to the S3 assets bucket),and assign it as the `taskRole` on the `FargateTaskDefinition`:
+```typescript
+const taskRole = new iam.Role(this,'TaskRole',{
+ assumedBy:new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+});
+bucket.grantRead(taskRole);
+```
+
+4. **Enable Secrets Manager auto-rotation** for database credentials to minimise the window of exposure if credentials are compromised."
+"Security","How do you manage permissions for people and machines?","Grant least privilege access","Yes","No","[From Template] The `FargateTaskDefinition` is created without an explicit `taskRole`,so CDK will generate a default execution role without scoped,application-specific permissions. No IAM policies are defined to restrict what the ECS task can access. While the database security group sets `allowAllOutbound:false` and the database is placed in an isolated subnet (good network-level controls),there are no IAM-level least privilege policies limiting what AWS APIs or resources the task workload can interact with.","**Risk**:Without explicit least privilege IAM policies,the ECS task may inadvertently have access to AWS services and resources beyond what it needs. A compromised container could be used to escalate privileges or exfiltrate data from other AWS services in the account.
+
+**Recommendations**:
+
+1. **Define a scoped task role**:Explicitly create a task role with only required permissions:
+```typescript
+const taskRole = new iam.Role(this,'TaskRole',{
+ assumedBy:new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+ description:'Role for WebApp ECS task - least privilege',
+});
+// Grant only what is needed
+bucket.grantReadWrite(taskRole);
+```
+
+2. **Scope S3 bucket access**:Grant the task role access only to the specific S3 bucket and required actions rather than broad S3 permissions.
+
+3. **Use IAM Access Analyzer policy generation**:Capture CloudTrail logs from a staging run of the application and use IAM Access Analyzer to auto-generate a least privilege policy based on actual API calls made.
+
+4. **Apply permissions boundaries**:Attach a permissions boundary to the task role to cap the maximum permissions it can ever be granted:
+```typescript
+const boundary = iam.ManagedPolicy.fromManagedPolicyArn(this,'Boundary','arn:aws:iam::ACCOUNT_ID:policy/AppPermissionsBoundary');
+taskRole.addManagedPolicy(boundary);
+```
+
+5. **Review the execution role**:Ensure the auto-generated ECS task execution role only has permissions required to pull the container image and write logs — avoid attaching broad AWS managed policies."
+"Security","How do you manage permissions for people and machines?","Define permission guardrails for your organization","Yes","No","[From Template] The template does not define or reference any AWS Organizations Service Control Policies (SCPs),AWS Control Tower guardrails,or IAM permissions boundaries. There are no organizational-level controls preventing member accounts from granting overly broad permissions. No AWS Config conformance packs or Security Hub standards are configured to detect guardrail violations.","**Risk**:Without organizational permission guardrails,individual account operators can inadvertently or maliciously grant excessive permissions (including administrator access),disable security controls,or expose sensitive resources. This creates significant blast radius in the event of a compromise.
+
+**Recommendations**:
+
+1. **Implement AWS Organizations SCPs**:Define SCPs to restrict the maximum permissions available in the account where this workload runs. For example,deny the ability to disable CloudTrail,modify S3 Block Public Access settings,or create IAM users with console access:
+```json
+{
+ ""Effect"": ""Deny"",
+ ""Action"": [""cloudtrail:StopLogging"", ""s3:PutBucketPublicAccessBlock""],
+ ""Resource"": ""*""
+}
+```
+
+2. **Use permissions boundaries for delegated administration**:If developers are permitted to create IAM roles (e.g.,for the ECS task role),enforce a permissions boundary on all IAM roles they create to prevent privilege escalation.
+
+3. **Deploy AWS Control Tower**:Use AWS Control Tower to apply managed preventative and detective guardrails across your AWS Organization,including mandatory controls aligned to security frameworks such as NIST SP 800-53.
+
+4. **Codify guardrails in IaC**:Define permission boundaries and SCPs as CDK constructs or CloudFormation StackSets to ensure consistent deployment and prevent drift:
+```typescript
+new organizations.CfnPolicy(this,'DenyRootActivity',{
+ type:'SERVICE_CONTROL_POLICY',
+ content:JSON.stringify(scpDocument),
+ name:'DenyRootActivity',
+});
+```
+
+5. **Align to compliance frameworks**:Map guardrails to applicable standards (e.g.,ISO 27001,PCI-DSS) to ensure regulatory compliance across all accounts."
+"Security","How do you manage permissions for people and machines?","Manage access based on lifecycle","No","No","",""
+"Security","How do you manage permissions for people and machines?","Establish emergency access process","No","No","",""
+"Security","How do you manage permissions for people and machines?","Share resources securely within your organization","Yes","No","[From Template] The template creates an S3 assets bucket and an RDS database but defines no resource-based policies,bucket policies,or AWS Resource Access Manager (RAM) configurations to control or govern secure intra-organizational resource sharing. There are no `PrincipalOrgID` condition keys in any resource policy,and no IAM Access Analyzer configurations to monitor for unintended sharing.","**Risk**:Without explicit secure sharing controls,resources may be inadvertently shared too broadly within the organization,or ad-hoc cross-account access may be granted without proper controls,leading to data exposure or compliance violations.
+
+**Recommendations**:
+
+1. **Add an explicit S3 bucket policy** using the `PrincipalOrgID` condition to ensure that even if cross-account access is granted in the future,it is restricted to principals within your AWS Organization:
+```typescript
+bucket.addToResourcePolicy(new iam.PolicyStatement({
+ effect:iam.Effect.DENY,
+ principals:[new iam.AnyPrincipal()],
+ actions:['s3:*'],
+ conditions:{
+ StringNotEquals:{'aws:PrincipalOrgID':'o-XXXXXXXXXXXX'}
+},
+ resources:[bucket.bucketArn,`${bucket.bucketArn}/*`],
+}));
+```
+
+2. **Use AWS RAM for intentional sharing**:If the S3 bucket,VPC subnets,or other resources need to be shared with other accounts in your organization,use AWS RAM to manage sharing formally rather than ad-hoc resource policies.
+
+3. **Tag shared resources**:Apply consistent tags (e.g.,`SharedWith`,`DataClassification`,`Owner`) to all resources to enable tracking and auditing of shared resources.
+
+4. **Configure IAM Access Analyzer**:Enable IAM Access Analyzer at the AWS Organizations level to continuously detect resources in this account that are accessible from other accounts or publicly,and generate findings for review."
+"Security","How do you manage permissions for people and machines?","Reduce permissions continuously","Yes","No","[From Template] No IAM Access Analyzer,IAM Access Advisor tooling,AWS Config rules,or AWS Security Hub standards are configured in the template. There is no automated mechanism to detect over-permissive IAM policies,identify unused access,or enforce continuous permission reduction. The absence of an explicit task IAM role also means there is no baseline from which permissions can be continuously reviewed and tightened.","**Risk**:Without continuous permission reduction,permissions accumulate over time as workloads evolve (permissions creep). Overly broad permissions increase the blast radius of a credential compromise or container escape.
+
+**Recommendations**:
+
+1. **Enable IAM Access Analyzer**:Create an IAM Access Analyzer for the account or at the AWS Organizations level to continuously identify resources exposed to external principals and unused access:
+```typescript
+new accessanalyzer.CfnAnalyzer(this,'AccessAnalyzer',{
+ type:'ACCOUNT',
+ analyzerName:'webapp-access-analyzer',
+});
+```
+
+2. **Enable AWS Security Hub with CSPM standards**:Activate Security Hub with the AWS Foundational Security Best Practices standard to automatically detect overly permissive IAM configurations and receive prioritised findings.
+
+3. **Use CloudTrail-based policy generation**:After running the application in a staging environment,use IAM Access Analyzer's policy generation feature to automatically produce a least privilege policy based on actual CloudTrail API activity,then apply it to the ECS task role.
+
+4. **Add AWS Config rules for IAM hygiene**:Add Config rules such as `iam-no-inline-policy-check`,`iam-policy-no-statements-with-admin-access`,and `iam-root-access-key-check` to detect drift from least privilege baselines:
+```typescript
+new config.ManagedRule(this,'NoAdminPolicy',{
+ identifier:config.ManagedRuleIdentifiers.IAM_POLICY_NO_STATEMENTS_WITH_ADMIN_ACCESS,
+});
+```
+
+5. **Integrate permission reviews into CI/CD**:Use tools such as `cfn-policy-validator` or `aws-iam-access-analyzer` CLI in the CDK pipeline to validate IAM policies before deployment,blocking changes that introduce over-permissive access."
+"Security","How do you manage permissions for people and machines?","Share resources securely with a third party","Yes","No","[From Template] The template does not configure any cross-account IAM roles with external ID conditions,AWS PrivateLink endpoints for third-party service integrations,or resource-based policies restricting access to specific external principals. No third-party access mechanisms (secure or otherwise) are present in the template.","**Risk**:If third-party access is introduced without proper controls (e.g.,creating IAM users with long-term credentials,or granting overly broad cross-account role trust),attackers can exploit the ""confused deputy"" problem or leaked credentials to gain unauthorized access to your AWS environment and workload data.
+
+**Recommendations**:
+
+1. **Use cross-account IAM roles with external ID**:If a third party (e.g.,a SaaS vendor or monitoring provider) needs access to resources in this account,create a dedicated IAM role with a trust policy that requires the third party's AWS account ID AND an external ID:
+```typescript
+const thirdPartyRole = new iam.Role(this,'ThirdPartyRole',{
+ assumedBy:new iam.AccountPrincipal('THIRD_PARTY_ACCOUNT_ID'),
+ externalIds:['unique-external-id-agreed-with-vendor'],
+ maxSessionDuration:cdk.Duration.hours(1),
+});
+```
+
+2. **Apply least privilege to third-party roles**:Grant only the specific permissions the third party needs,scoped to specific resources (e.g.,read-only access to a specific S3 prefix).
+
+3. **Use AWS PrivateLink for service integrations**:Where third-party services offer VPC endpoint integrations,use AWS PrivateLink instead of exposing resources over the public internet.
+
+4. **Audit third-party access with CloudTrail**:Ensure CloudTrail is enabled and that alerts (e.g.,via EventBridge or CloudWatch) are configured to notify when third-party roles are assumed.
+
+5. **Implement time-bound access**:Define and enforce a process to revoke third-party access after project completion,and periodically review active cross-account trust relationships using IAM Access Analyzer."
+"Security","How do you manage permissions for people and machines?","Analyze public and cross account access","Yes","No","[From Template] While the S3 bucket correctly sets `blockPublicAccess:s3.BlockPublicAccess.BLOCK_ALL`,there is no IAM Access Analyzer configured,no AWS Config rules monitoring for public access changes,and no automated alerting if public access settings are modified. No systematic approach to continuously analyze and detect public or cross-account access paths is present in the template.","**Risk**:Without continuous analysis of public and cross-account access,resources could inadvertently become publicly accessible (e.g.,through a misconfigured bucket policy or security group change) without detection. This could lead to data breaches or unauthorized access to sensitive application data.
+
+**Recommendations**:
+
+1. **Enable IAM Access Analyzer**:Deploy an IAM Access Analyzer to automatically and continuously detect resources — such as S3 buckets,IAM roles,and KMS keys — that are accessible from outside the account:
+```typescript
+new accessanalyzer.CfnAnalyzer(this,'AccessAnalyzer',{
+ type:'ACCOUNT',
+ analyzerName:'public-access-analyzer',
+});
+```
+
+2. **Add AWS Config rules for S3 public access**:Deploy Config rules to detect if S3 public access block settings are ever disabled and enable auto-remediation:
+```typescript
+new config.ManagedRule(this,'S3PublicAccessCheck',{
+ identifier:config.ManagedRuleIdentifiers.S3_ACCOUNT_LEVEL_PUBLIC_ACCESS_BLOCKS,
+});
+```
+
+3. **Enable CloudWatch alarms for S3 Block Public Access changes**:Use AWS CloudTrail and EventBridge to alert on API calls such as `PutBucketPublicAccessBlock` or `PutBucketPolicy` that could expose the bucket.
+
+4. **Enable AWS Security Hub**:Activate Security Hub with the AWS Foundational Security Best Practices standard,which includes automated checks for publicly accessible S3 buckets,RDS instances,and other resources.
+
+5. **Enable Amazon Macie**:Configure Amazon Macie on the S3 assets bucket to discover and alert on any sensitive data (PII,credentials) that may be present,especially if bucket access configurations change.
+
+6. **Validate ALB security group scope**:Ensure the ALB security group ingress rules are restricted to expected traffic sources (e.g.,`0.0.0.0/0` on port 443 only),and add a CloudWatch alarm to detect unexpected security group rule changes."
+"Security","How do you detect and investigate security events?","Configure service and application logging","Yes","No","[From Template] Critical logging gaps exist throughout the stack. VPC Flow Logs are explicitly commented out. The ALB has no access logging configured. The S3 bucket has no server access logging. No CloudTrail trail is defined. RDS Enhanced Monitoring and Performance Insights are absent. Only ECS container logs via `awsLogs` and ECS Container Insights are enabled,leaving the majority of the infrastructure without adequate logging coverage.","**Risk**:Without comprehensive logging,detecting unauthorized access,unusual traffic patterns,or data exfiltration becomes extremely difficult or impossible,significantly increasing mean-time-to-detect (MTTD) for security incidents.
+
+**Recommendations**:
+
+1. **Enable VPC Flow Logs**:Uncomment and implement the VPC Flow Log configuration already present in the template. Stream logs to CloudWatch Logs or S3 for network traffic analysis:
+```typescript
+vpc.addFlowLog('FlowLog',{
+ destination:ec2.FlowLogDestination.toCloudWatchLogs()
+});
+```
+
+2. **Enable ALB Access Logging**:Create a dedicated S3 bucket for ALB access logs to capture every request:
+```typescript
+const logBucket = new s3.Bucket(this,'AlbLogsBucket',{
+ encryption:s3.BucketEncryption.S3_MANAGED,
+ blockPublicAccess:s3.BlockPublicAccess.BLOCK_ALL,
+});
+alb.logAccessLogs(logBucket);
+```
+
+3. **Enable S3 Server Access Logging**:Add server access logging to the `AssetsBucket` to capture object-level requests.
+
+4. **Enable CloudTrail**:Add a CloudTrail trail to capture all API calls across the account,storing logs in a dedicated S3 bucket with log file validation enabled.
+
+5. **Enable RDS Enhanced Monitoring and Performance Insights**:Add `monitoringInterval` and `enablePerformanceInsights:true` to the RDS instance definition for deeper visibility into database activity.
+
+6. **Define log retention policies** on CloudWatch Log Groups to align with your compliance requirements (typically 90 days to 1 year readily available)."
+"Security","How do you detect and investigate security events?","Capture logs,findings,and metrics in standardized locations","Yes","No","[From Template] The template lacks any centralized log aggregation strategy. ECS container logs flow to CloudWatch with no defined retention policy or export to S3. There is no Amazon Security Lake,no centralized log archive S3 bucket,no AWS Security Hub,no Amazon GuardDuty,and no Amazon Inspector configured. Logs from different services (ALB,RDS,VPC,S3) are either not collected or sent to disparate,unstandardized locations.","**Risk**:Without standardized,centralized log storage,security investigations require accessing multiple fragmented sources,increasing time-to-investigate and creating blind spots. Correlation across services becomes manual and error-prone.
+
+**Recommendations**:
+
+1. **Enable Amazon GuardDuty**:Activate GuardDuty to automatically analyze CloudTrail,VPC Flow Logs,and DNS logs for threats. This is a managed service with no agent to deploy:
+```typescript
+import * as guardduty from 'aws-cdk-lib/aws-guardduty';
+new guardduty.CfnDetector(this,'GuardDuty',{enable:true});
+```
+
+2. **Enable AWS Security Hub**:Aggregate findings from GuardDuty,Inspector,and Config into a single pane of glass for centralized visibility:
+```typescript
+import * as securityhub from 'aws-cdk-lib/aws-securityhub';
+new securityhub.CfnHub(this,'SecurityHub',{});
+```
+
+3. **Create a Centralized Log Archive S3 Bucket**:Route CloudTrail,VPC Flow Logs,ALB access logs,and S3 server access logs to a single dedicated S3 bucket with versioning,encryption,and strict access controls.
+
+4. **Set CloudWatch Log Group Retention**:Explicitly define retention periods on CloudWatch log groups used by ECS to prevent indefinite storage and ensure compliance:
+```typescript
+import * as logs from 'aws-cdk-lib/aws-logs';
+const logGroup = new logs.LogGroup(this,'AppLogGroup',{
+ retention:logs.RetentionDays.THREE_MONTHS,
+});
+```
+
+5. **Consider Amazon Security Lake**:For a mature posture,deploy Amazon Security Lake to normalize logs from VPC Flow Logs,CloudTrail,and GuardDuty findings into OCSF format stored as Parquet in S3,enabling efficient querying via Amazon Athena."
+"Security","How do you detect and investigate security events?","Correlate and enrich security events","Yes","No","[From Template] There are no security event correlation mechanisms defined. No Amazon GuardDuty,AWS Security Hub,Amazon EventBridge security rules,or AWS Lambda enrichment functions are configured. The only monitoring present is a single CloudWatch CPU alarm on the ECS service with no actions attached,and no 5xx or database alarms. No threat intelligence or cross-source correlation capabilities exist.","**Risk**:Without correlating and enriching security events,individual alerts lack context,leading to alert fatigue,missed attack patterns spanning multiple services,and prolonged incident response times.
+
+**Recommendations**:
+
+1. **Enable Amazon GuardDuty**:GuardDuty correlates CloudTrail events,VPC Flow Logs,and DNS logs using ML models to detect threats like credential compromise,data exfiltration,or crypto-mining without requiring manual correlation.
+
+2. **Centralize findings with AWS Security Hub**:Aggregate findings from GuardDuty,Inspector,and AWS Config into Security Hub and enable AWS Foundational Security Best Practices (FSBP) standard to automatically score and prioritize findings.
+
+3. **Use Amazon EventBridge for automated enrichment**:Route GuardDuty or Security Hub findings to Lambda for enrichment with contextual data (e.g.,resource tags,owner info):
+```typescript
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
+new events.Rule(this,'GuardDutyFindingRule',{
+ eventPattern:{
+ source:['aws.guardduty'],
+ detailType:['GuardDuty Finding'],
+},
+ targets:[new targets.LambdaFunction(enrichmentFn)],
+});
+```
+
+4. **Add ALB 5xx and RDS connection alarms**:[From Template] The commented gaps explicitly note missing ALB 5xx and DB connection alarms. Add these CloudWatch alarms with SNS actions to correlate application errors with security events.
+
+5. **Fix the existing CPU alarm**:The `cpuAlarm` has no alarm actions. Attach an SNS topic so alerts are actionable:
+```typescript
+cpuAlarm.addAlarmAction(new cw_actions.SnsAction(alarmTopic));
+```"
+"Security","How do you detect and investigate security events?","Initiate remediation for non-compliant resources","Yes","No","[From Template] No automated remediation infrastructure is present. There is no AWS Config recorder or Config Rules,no Security Hub CSPM standards,no EventBridge-triggered remediation workflows,no AWS Systems Manager Automation documents,and no Lambda-based remediation functions. Non-compliant configurations (e.g.,hardcoded credentials,missing HTTPS,no WAF) exist in the template with no automated enforcement or detection mechanisms.","**Risk**:Without automated remediation,non-compliant resources may remain exposed for extended periods. The template already contains multiple misconfigurations (plaintext credentials,HTTP-only listener,no WAF) that would persist undetected without detective and responsive controls.
+
+**Recommendations**:
+
+1. **Enable AWS Config**:Deploy an AWS Config recorder to continuously evaluate resource configurations against desired states:
+```typescript
+import * as config from 'aws-cdk-lib/aws-config';
+new config.CloudFormationStackDriftDetectionCheck(this,'DriftCheck',{
+ ownStackOnly:true,
+});
+```
+
+2. **Enable Security Hub CSPM Standards**:Activate the AWS Foundational Security Best Practices standard in Security Hub. This will immediately flag issues like the unencrypted HTTP listener,missing WAF,and open security group configurations present in this template.
+
+3. **Implement EventBridge-triggered remediation**:Route Security Hub or Config findings to EventBridge and trigger Lambda functions or SSM Automation documents for automated remediation:
+```typescript
+new events.Rule(this,'RemediationRule',{
+ eventPattern:{
+ source:['aws.securityhub'],
+ detailType:['Security Hub Findings - Imported'],
+},
+ targets:[new targets.LambdaFunction(remediationFn)],
+});
+```
+
+4. **Immediate fixes for critical non-compliant resources in this template**:
+ - Replace hardcoded RDS credentials with AWS Secrets Manager (`rds.Credentials.fromGeneratedSecret('admin')`).
+ - Replace the HTTP listener with HTTPS and enforce TLS using an ACM certificate.
+ - Remove the plaintext `DB_PASS` environment variable and use Secrets Manager integration.
+ - Associate an AWS WAF WebACL with the ALB.
+
+5. **Use AWS CloudFormation Guard** in the CI/CD pipeline to block non-compliant IaC templates before deployment,preventing misconfigurations from reaching production."
+"Security","How do you protect your network resources?","Create network layers","Yes","Yes","[From Template] The CDK code provisions a VPC with three distinct subnet tiers:Public subnets host the internet-facing ALB,Private subnets with egress (PRIVATE_WITH_EGRESS) host ECS Fargate containers,and Isolated private subnets (PRIVATE_ISOLATED) host the RDS PostgreSQL database. This correctly implements a three-tier architecture,placing the most sensitive data (database) in the most isolated network tier,compute in private subnets,and only public endpoints in public subnets. Each workload component is consistently deployed to its appropriate network tier throughout the template.",""
+"Security","How do you protect your network resources?","Control traffic within your network layers","Yes","No","[From Template] While the database security group sets `allowAllOutbound:false` and restricts access to only ECS Fargate on TCP port 5432,significant traffic control gaps exist. The ALB listener is HTTP-only (port 80) with no HTTPS enforcement and no HTTP-to-HTTPS redirect. No AWS WAF web ACL is associated with the ALB (explicitly flagged as a gap in the template comments). No AWS Network Firewall or Route 53 Resolver DNS Firewall is deployed. These omissions leave web-facing traffic largely uncontrolled against common attack vectors.","**Risk**:Absence of WAF and HTTPS enforcement exposes the application to web-layer attacks (SQL injection,XSS,CSRF),unencrypted data interception,and unauthorized traffic reaching application components. This is rated High Risk under the AWS Well-Architected Framework.
+
+**Recommendations**:
+
+1. **Enforce HTTPS on the ALB**:Add an HTTPS listener on port 443 using an ACM certificate and redirect HTTP to HTTPS:
+```typescript
+const cert = new acm.Certificate(this,'Cert',{domainName:'example.com'});
+alb.addListener('HttpsListener',{port:443,certificates:[cert],defaultTargetGroups:[targetGroup]});
+alb.addListener('HttpRedirect',{port:80}).addAction('Redirect',{
+ action:elbv2.ListenerAction.redirect({protocol:'HTTPS',port:'443',permanent:true})
+});
+```
+
+2. **Associate AWS WAF with the ALB**:Deploy a WAF web ACL with AWS Managed Rule Groups:
+```typescript
+const webAcl = new wafv2.CfnWebACL(this,'WebAcl',{
+ scope:'REGIONAL',
+ defaultAction:{allow:{}},
+ rules:[/* AWSManagedRulesCommonRuleSet,SQLiRuleSet */],
+ visibilityConfig:{...}
+});
+new wafv2.CfnWebACLAssociation(this,'WafAssoc',{
+ resourceArn:alb.loadBalancerArn,webAclArn:webAcl.attrArn
+});
+```
+
+3. **Define explicit security groups for the ALB and ECS tasks**:Restrict the ALB security group to accept only HTTPS (443) from the internet. Restrict the ECS task security group to accept traffic only from the ALB security group and limit outbound to port 5432 toward the DB security group.
+
+4. **Add Route 53 Resolver DNS Firewall**:Create domain-based allow/deny rules to control which external domains ECS tasks can resolve,preventing DNS-based data exfiltration and C2 communication."
+"Security","How do you protect your network resources?","Implement inspection-based protection","Yes","No","[From Template] No inspection-based protections are present at any layer. The ALB has no AWS WAF web ACL (explicitly flagged as a gap in comments). VPC Flow Logs are commented out. No AWS Network Firewall,Gateway Load Balancer with IPS appliances,or VPC Traffic Mirroring is configured. There is no mechanism to inspect,filter,or analyze traffic for malicious payloads,behavioral anomalies,or known threat signatures across any of the network layers defined in the template.","**Risk**:Without traffic inspection,the internet-facing application cannot detect or block DDoS attacks,SQL injection,XSS,bot traffic,or zero-day exploits. Malicious payloads can traverse all three network tiers undetected. Though rated Medium Risk,this is a critical gap for an internet-facing application.
+
+**Recommendations**:
+
+1. **Deploy AWS WAF with AWS Managed Rule Groups on the ALB**:Managed Rule Groups auto-update with emerging threat intelligence:
+ - `AWSManagedRulesCommonRuleSet`:OWASP Top 10 protections
+ - `AWSManagedRulesKnownBadInputsRuleSet`:Blocks known malicious inputs
+ - `AWSManagedRulesSQLiRuleSet`:SQL injection protection
+ - `AWSManagedRulesAmazonIpReputationList`:Blocks known malicious IP addresses
+
+2. **Enable VPC Flow Logs immediately**:The flow log configuration is already written but commented out — simply enable it:
+```typescript
+vpc.addFlowLog('FlowLog',{destination:ec2.FlowLogDestination.toCloudWatchLogs()});
+```
+This provides baseline visibility into accepted and rejected traffic across all network interfaces.
+
+3. **Consider AWS Network Firewall for inter-subnet inspection**:Deploy AWS Network Firewall with Suricata-compatible stateful rules to inspect east-west traffic flows between the public,private,and isolated subnet tiers — going beyond port/protocol-level security group rules.
+
+4. **Place CloudFront in front of the ALB**:CloudFront adds an edge-level WAF inspection point with AWS Shield integration,enabling threat detection before traffic reaches the ALB,while also improving performance.
+
+5. **Enable AWS Shield Standard/Advanced**:Shield Standard is active automatically. For the internet-facing ALB,consider Shield Advanced for automatic layer 7 DDoS mitigation and 24/7 access to the AWS DDoS Response Team."
+"Security","How do you protect your network resources?","Automate network protection","Yes","No","[From Template] While the infrastructure is defined as AWS CDK code (a positive IaC foundation),no automated network protection mechanisms exist. There are no AWS WAF managed rule groups that auto-update with threat intelligence,no AWS Shield Advanced for automatic DDoS mitigation,no AWS Network Firewall managed rule groups,and no evidence of CloudFormation Guard policy validation or CI/CD pipeline security checks. Since no WAF or firewall is deployed,there are no protection mechanisms being automated.","**Risk**:Without automated protection,the application is vulnerable to emerging threats that require timely manual rule updates. Configuration drift can silently degrade security posture,and newly deployed resources may lack consistent controls. This is rated Medium Risk.
+
+**Recommendations**:
+
+1. **Add WAF with auto-updating Managed Rule Groups**:Building on the existing CDK approach,add WAF Managed Rule Groups that AWS updates automatically as new threat signatures emerge — eliminating the need for manual rule maintenance.
+
+2. **Integrate CloudFormation Guard (cfn-guard) into a CI/CD pipeline**:Validate CDK-synthesized CloudFormation templates before deployment. For example,enforce that all ALBs must have a WAF association and that HTTP-only listeners are disallowed:
+```bash
+cdk synth | cfn-guard validate -r security-rules.guard
+```
+
+3. **Enable AWS Shield Advanced**:Provides automatic application layer DDoS mitigation integrated with WAF,automatically creating rate-based rules during attacks without manual intervention.
+
+4. **Use AWS Firewall Manager**:Centrally enforce WAF web ACL policies and security group policies across accounts and VPCs,automatically applying them to new ALBs and resources as they are deployed — preventing protection gaps from new resource creation.
+
+5. **Implement AWS Config rules for drift detection**:Use Config managed rules such as `alb-waf-enabled` and `vpc-sg-open-only-to-authorized-ports` to automatically detect and alert on security group or WAF configuration deviations outside the CDK pipeline.
+
+6. **Use EventBridge + Lambda for automated response**:Trigger automated remediation Lambda functions when Config rules detect non-compliant network configurations,automatically restoring security group rules or WAF associations to their defined IaC state."
+"Security","How do you protect your compute resources?","Perform vulnerability management","Yes","No","[From Template] The template defines an ECS Fargate service pulling `nginx:latest` from a public Docker Hub registry with no Amazon Inspector,AWS Security Hub,or any vulnerability scanning mechanism configured. There is no CI/CD pipeline integration visible for pre-deployment security checks,and no reference to AWS Security Bulletins or patch management processes.","**Risk**:Without a vulnerability management program,known CVEs in the nginx container image or application code may go undetected and unpatched,exposing the workload to exploitation.
+
+**Recommendations**:
+1. **Enable Amazon Inspector**:Configure Inspector to continuously scan ECS container images for known CVEs. It integrates natively with Amazon ECR and provides automated,ongoing assessments.
+2. **Migrate to Amazon ECR**:Move the container image from Docker Hub to ECR and enable ECR Enhanced Scanning (powered by Inspector) to scan on push and continuously.
+3. **Avoid the `:latest` tag**:Pin the image to a specific version (e.g.,`nginx:1.25.3`) so CVE tracking and patching are deterministic.
+4. **Integrate scanning into CI/CD**:Add a vulnerability scanning step before deployment so critical CVEs block the pipeline.
+5. **Enable AWS Security Hub**:Activate the NIST 800-53 standard in Security Hub to aggregate and prioritize findings across compute resources.
+
+Example CDK snippet for ECR with Inspector scanning:
+```typescript
+const repo = new ecr.Repository(this,'AppRepo',{
+ imageScanOnPush:true,
+});
+```
+Subscribe to AWS Security Bulletins and establish a formal process to prioritize and remediate findings by severity."
+"Security","How do you protect your compute resources?","Provision compute from hardened images","Yes","No","[From Template] The Fargate task definition pulls `nginx:latest` directly from the public Docker Hub registry (`ecs.ContainerImage.fromRegistry('nginx:latest')`). There is no use of a private Amazon ECR repository,no hardened or validated base image,no EC2 Image Builder pipeline for container images,and no central governance over the image used.","**Risk**:Using unvalidated public images from Docker Hub introduces the risk of deploying images with known vulnerabilities,hidden malware,or configurations that do not conform to your security baseline. The `:latest` tag also makes it impossible to track which exact image version is running.
+
+**Recommendations**:
+1. **Build and store images in Amazon ECR**:Create a private ECR repository,build a hardened nginx image based on a minimal,vetted base (e.g.,`nginx:1.25.3-alpine` or an AWS-provided base image),and store it in ECR.
+2. **Harden the container image**:Apply CIS Benchmark controls for containers — remove unnecessary packages,run as a non-root user,disable unused capabilities,and set a read-only filesystem where possible.
+3. **Automate image builds**:Use AWS CodeBuild or EC2 Image Builder (for container images) in a CI/CD pipeline to rebuild and publish a hardened image regularly.
+4. **Pin image versions**:Replace `:latest` with a specific digest or tag for reproducible deployments.
+
+Example CDK change:
+```typescript
+image:ecs.ContainerImage.fromEcrRepository(
+ ecr.Repository.fromRepositoryName(this,'AppRepo','my-hardened-nginx'),
+ '1.25.3'
+),
+```
+5. **Enforce ECR as the only allowed registry** via AWS Config rules or Service Control Policies to prevent workload teams from pulling from unapproved public registries."
+"Security","How do you protect your compute resources?","Validate software integrity","Yes","No","[From Template] The container image is pulled directly from the public Docker Hub registry with no signature verification,digest pinning,or provenance checks. No AWS Signer,Amazon ECR image signing,or CodeArtifact is configured. The image reference `nginx:latest` provides no integrity guarantees — a mutable tag that could point to a different image at any time.","**Risk**:Without software integrity validation,a compromised or tampered image from Docker Hub could be deployed silently. A mutable `:latest` tag can resolve to different image content across deployments,making it impossible to verify what is actually running in production.
+
+**Recommendations**:
+1. **Pin images to immutable digests**:Reference images by their SHA256 digest in addition to a version tag to guarantee exact content.
+```typescript
+image:ecs.ContainerImage.fromRegistry(
+ 'nginx@sha256:<specific-digest>'
+),
+```
+2. **Enable ECR image signing with AWS Signer**:Push verified images to ECR and use AWS Signer to sign container images. Configure Amazon ECS to only run signed images.
+3. **Enable ECR image scanning**:Turn on `imageScanOnPush` in ECR to automatically verify image integrity and scan for vulnerabilities on every push.
+4. **Verify third-party dependencies**:Use AWS CodeArtifact as a controlled proxy for npm,Maven,or Python packages to ensure only approved,verified packages are consumed by build processes.
+5. **Integrate verification into CI/CD**:Add steps to verify digital signatures of all artifacts (container images,binaries,Lambda ZIPs) before promotion to production environments.
+
+These controls together ensure both integrity (the artifact hasn't been tampered with) and provenance (the artifact was produced by a trusted source)."
+"Security","How do you protect your compute resources?","Reduce manual management and interactive access","Yes","Yes","[From Template] The workload uses ECS Fargate,which is a serverless container runtime that inherently eliminates direct SSH/RDP access to underlying compute infrastructure. No bastion hosts are provisioned. Fargate tasks run in private subnets (`PRIVATE_WITH_EGRESS`) with no public IPs (`assignPublicIp:false`). The deployment circuit breaker with rollback (`circuitBreaker:{rollback:true}`) enforces an immutable infrastructure update pattern.",""
+"Security","How do you protect your compute resources?","Automate compute protection","Yes","No","[From Template] None of the core automated compute protection services — Amazon Inspector,Amazon GuardDuty,AWS Security Hub,or AWS Config — are configured in the template. There are no automated remediation workflows using EventBridge or Lambda. The only monitoring configured is a CPU utilization CloudWatch alarm with no actions attached,which is insufficient for automated security protection.","**Risk**:Without automated compute protection,security threats,misconfigurations,and vulnerabilities go undetected until manual discovery. In a container workload,threats can propagate rapidly,and the window between exploitation and detection can be critical.
+
+**Recommendations**:
+1. **Enable Amazon GuardDuty with ECS Runtime Monitoring**:GuardDuty automatically detects anomalous behavior,malware,and threats within ECS Fargate tasks and EC2 instances. Enable ECS Runtime Monitoring for the account/region.
+2. **Enable Amazon Inspector for ECR**:Continuously scan container images in ECR for CVEs,with findings automatically reported to Security Hub.
+3. **Enable AWS Security Hub**:Activate Security Hub with the AWS Foundational Security Best Practices standard to detect compute misconfigurations (e.g.,publicly exposed resources,missing encryption).
+4. **Enable AWS Config rules**:Add managed rules such as `ecs-task-definition-nonroot-user` and `ecs-no-environment-secrets` to automatically detect non-compliant task definitions.
+5. **Attach actions to CloudWatch alarms**:The existing CPU alarm has no SNS action. Add an SNS topic and alarm actions:
+```typescript
+const snsTopic = new sns.Topic(this,'AlertTopic');
+cpuAlarm.addAlarmAction(new cwActions.SnsAction(snsTopic));
+```
+6. **Automate remediation**:Use Amazon EventBridge rules to trigger Lambda functions that respond to GuardDuty or Security Hub findings automatically (e.g.,isolating compromised tasks by modifying security groups)."
+"Security","How do you classify your data?","Understand your data classification scheme","No","No","",""
+"Security","How do you classify your data?","Apply data protection controls based on data sensitivity","Yes","No","[From Template] While some controls exist (RDS `storageEncrypted:true`,S3 `BucketEncryption.S3_MANAGED`,`BlockPublicAccess.BLOCK_ALL`),significant gaps exist:database credentials and DB passwords are hardcoded in plaintext (both in `rds.Credentials.fromPassword` and the container's `environment` block),the ALB only uses HTTP (port 80) with no HTTPS/TLS,there is no WAF,no VPC flow logs,no ALB access logging,and no S3 access logging.","**Risk**:Insufficient data protection controls expose sensitive data (credentials,application traffic,database content) to unauthorized access,interception,and data breaches,which can violate compliance regulations (e.g.,GDPR in eu-west-2).
+
+**Recommendations**:
+
+1. **Secrets Management**:Replace hardcoded credentials with AWS Secrets Manager. Use `rds.Credentials.fromGeneratedSecret('admin')` in CDK for the RDS instance,and reference the secret in the ECS task definition using `ecs.Secret.fromSecretsManager(secret)` instead of plaintext environment variables.
+
+2. **Encrypt Data in Transit**:Add an HTTPS listener (port 443) to the ALB using an ACM certificate,and configure HTTP-to-HTTPS redirect on port 80:
+```typescript
+const httpsListener = alb.addListener('HttpsListener',{
+ port:443,
+ protocol:elbv2.ApplicationProtocol.HTTPS,
+ certificates:[elbv2.ListenerCertificate.fromArn(certArn)],
+});
+```
+
+3. **Enable VPC Flow Logs**:Uncomment and enable the flow logs for network traffic auditing:
+```typescript
+vpc.addFlowLog('FlowLog',{destination:ec2.FlowLogDestination.toCloudWatchLogs()});
+```
+
+4. **Enable ALB and S3 Access Logging**:Enable access logging on the ALB and S3 bucket to maintain an audit trail of data access.
+
+5. **Use AWS KMS CMK**:Replace `S3_MANAGED` encryption with a KMS-managed key (`BucketEncryption.KMS`) to gain fine-grained key management and audit trail via AWS CloudTrail.
+
+6. **Associate AWS WAF**:Attach a WAF WebACL to the ALB to protect against common web exploits targeting application data."
+"Security","How do you classify your data?","Automate identification and classification","Yes","No","[From Template] The template contains no automated data identification or classification mechanisms. There is no Amazon Macie configured for the S3 bucket (`AssetsBucket`),no Amazon Comprehend integration,no AWS Glue sensitive data detection,and no automated remediation workflows to detect or respond to sensitive data stored in unauthorized locations.","**Risk**:Without automated data identification and classification,sensitive data (e.g.,PII,credentials,financial records) may be inadvertently stored in the S3 bucket or other data stores without appropriate controls,leading to compliance violations and data breaches that go undetected.
+
+**Recommendations**:
+
+1. **Enable Amazon Macie on the S3 Bucket**:Configure Macie to perform automated sensitive data discovery on the `AssetsBucket`. Enable broad automated discovery and set up targeted discovery jobs for deeper analysis:
+```typescript
+// Use CfnSession to enable Macie
+new macie.CfnSession(this,'MacieSession',{
+ findingPublishingFrequency:'SIX_HOURS',
+ status:'ENABLED',
+});
+```
+
+2. **Configure Macie Findings to EventBridge**:Route Macie findings to Amazon EventBridge and trigger automated remediation (e.g.,restrict S3 bucket access,tag objects,or notify security teams via SNS).
+
+3. **Integrate Scanning into CI/CD**:Incorporate sensitive data scanning tools into the build/test pipeline to prevent sensitive data (like the hardcoded `Pr0duction_Pass!` already present in this template) from being committed or deployed.
+
+4. **Use AWS Config Rules**:Deploy AWS Config managed rules (e.g.,`s3-bucket-public-read-prohibited`,`rds-instance-public-access-check`) to continuously monitor data store configurations for compliance with classification policies.
+
+5. **Tag Data Resources for Classification**:Apply classification tags (e.g.,`Classification:Confidential`) to the RDS instance and S3 bucket,and use AWS Config to alert on tag removal or modification."
+"Security","How do you classify your data?","Define scalable data lifecycle management","Yes","No","[From Template] While the S3 bucket has versioning enabled and `removalPolicy:RETAIN`,and RDS has a 7-day backup retention,the template explicitly lacks S3 lifecycle rules (commented as a gap),has no AWS Backup configuration,no S3 Object Lock,no ALB or S3 access log lifecycle management,and no automated archival or expiration policies for any data tier.","**Risk**:Without scalable lifecycle management,data accumulates indefinitely,increasing storage costs,expanding the attack surface for sensitive data,and potentially violating data retention compliance requirements (e.g.,GDPR's right to erasure in eu-west-2).
+
+**Recommendations**:
+
+1. **Add S3 Lifecycle Rules**:Configure lifecycle rules on `AssetsBucket` to transition objects to cheaper storage tiers and expire stale data:
+```typescript
+const bucket = new s3.Bucket(this,'AssetsBucket',{
+ lifecycleRules:[{
+ transitions:[{
+ storageClass:s3.StorageClass.INFREQUENT_ACCESS,
+ transitionAfter:cdk.Duration.days(90),
+},{
+ storageClass:s3.StorageClass.GLACIER,
+ transitionAfter:cdk.Duration.days(365),
+}],
+ expiration:cdk.Duration.days(2555),// 7 years
+ noncurrentVersionExpiration:cdk.Duration.days(90),
+}],
+});
+```
+
+2. **Configure AWS Backup**:Add AWS Backup plans to automate and centralize backups for the RDS instance,enabling cross-region copies and vault isolation from the production account:
+```typescript
+const plan = backup.BackupPlan.dailyMonthly1YearRetention(this,'BackupPlan');
+plan.addSelection('RdsSelection',{resources:[backup.BackupResource.fromRdsDatabaseInstance(database)]});
+```
+
+3. **Enable S3 Object Lock**:For compliance-sensitive data,consider enabling Object Lock with a retention policy to enforce immutability during the required retention period.
+
+4. **Extend RDS Backup Retention**:The current 7-day backup retention may be insufficient for compliance. Review regulatory requirements (e.g.,GDPR) and increase retention accordingly.
+
+5. **Lifecycle for Access Logs**:Once ALB and S3 access logging is enabled,apply lifecycle policies to those log buckets to expire logs after the required audit retention period."
+"Security","How do you protect your data at rest?","Implement secure key management","Yes","No","No AWS KMS Customer Managed Keys (CMKs) are defined or referenced anywhere in the template. The RDS instance uses `storageEncrypted:true` without a `storageEncryptionKey` property,defaulting to the AWS-managed key. S3 uses `BucketEncryption.S3_MANAGED` (SSE-S3 with AES-256),bypassing KMS entirely. No key rotation,key policies,or CloudTrail monitoring for key usage are configured. [From Template]","**Risk**:Without customer-managed KMS keys,you lose granular control over key access,rotation schedules,and auditability of decryption events. AWS-managed keys cannot be rotated on demand,have shared key policies,and do not allow cross-account access restrictions tailored to your workload.
+
+**Recommendations**:
+
+1. **Create dedicated CMKs for each data store**:
+```typescript
+import * as kms from 'aws-cdk-lib/aws-kms';
+
+const rdsKey = new kms.Key(this,'RdsKey',{
+ enableKeyRotation:true,
+ description:'CMK for RDS database encryption',
+ removalPolicy:cdk.RemovalPolicy.RETAIN,
+});
+const s3Key = new kms.Key(this,'S3Key',{
+ enableKeyRotation:true,
+ description:'CMK for S3 assets bucket encryption',
+});
+```
+
+2. **Reference the CMK in RDS**:
+```typescript
+const database = new rds.DatabaseInstance(this,'Database',{
+ storageEncrypted:true,
+ storageEncryptionKey:rdsKey,
+ ...
+});
+```
+
+3. **Reference the CMK in S3**:
+```typescript
+const bucket = new s3.Bucket(this,'AssetsBucket',{
+ encryption:s3.BucketEncryption.KMS,
+ encryptionKey:s3Key,
+ ...
+});
+```
+
+4. **Enable automatic key rotation** (`enableKeyRotation:true`) to reduce the blast radius of a compromised key.
+
+5. **Tighten key policies** to restrict which IAM roles and services (e.g.,only the ECS task role and RDS service principal) can use each key.
+
+6. **Enable AWS CloudTrail** to monitor KMS API calls (`Decrypt`,`GenerateDataKey`) and alert on anomalous usage via CloudWatch Alarms."
+"Security","How do you protect your data at rest?","Enforce encryption at rest","Yes","Yes","[From Template] The RDS instance is configured with `storageEncrypted:true`,ensuring database storage and automated snapshots are encrypted at rest. The S3 bucket is configured with `encryption:s3.BucketEncryption.S3_MANAGED`,enabling SSE-S3 (AES-256) encryption by default for all objects stored. Both primary persistent data stores in the architecture have encryption at rest explicitly enabled.",""
+"Security","How do you protect your data at rest?","Automate data at rest protection","Yes","No","While CDK (IaC) is used as a foundation,no automated compliance monitoring or protective services are configured. There are no AWS Config rules (e.g.,`rds-storage-encrypted`,`s3-default-encryption-kms`),no GuardDuty,no Amazon Macie for S3 sensitive data scanning,and no AWS Backup plans for automated encrypted backups. Only native RDS backup retention (`backupRetention:7 days`) is configured. [From Template]","**Risk**:Without automated monitoring and remediation,misconfigurations may go undetected for extended periods,sensitive data in S3 may be exposed,and there is no automated disaster recovery or security event-driven backup strategy.
+
+**Recommendations**:
+
+1. **Enable AWS Config rules** to continuously monitor encryption compliance:
+ - `rds-storage-encrypted` — ensures RDS instances are encrypted
+ - `s3-default-encryption-kms` — ensures S3 buckets use KMS encryption
+ - `encrypted-volumes` — if EBS volumes are added in the future
+
+2. **Enable Amazon GuardDuty** at the account level to detect anomalous access to RDS and S3 resources.
+
+3. **Enable Amazon Macie** on the S3 assets bucket to automatically discover and classify sensitive data:
+```typescript
+import * as macie from 'aws-cdk-lib/aws-macie';
+// Enable via CfnSession or through account-level setup
+```
+
+4. **Add AWS Backup** for RDS automated encrypted backups with cross-region copy:
+```typescript
+import * as backup from 'aws-cdk-lib/aws-backup';
+const plan = backup.BackupPlan.dailyWeeklyMonthly5YearRetention(this,'BackupPlan');
+plan.addSelection('DbSelection',{
+ resources:[backup.BackupResource.fromRdsDatabaseInstance(database)],
+});
+```
+
+5. **Use CloudFormation Guard** in your CI/CD pipeline to validate that all new IaC templates have encryption settings defined before deployment,preventing misconfigurations from ever reaching production."
+"Security","How do you protect your data at rest?","Enforce access control","Yes","No","The DB password is exposed in plaintext as an ECS container environment variable (`DB_PASS:'Pr0duction_Pass!'`) and hardcoded in RDS credentials (`rds.Credentials.fromPassword`). Any user with ECS `DescribeTaskDefinition` permission can retrieve database credentials. No explicit ECS task IAM role with least privilege is defined. No S3 Object Lock is configured for immutability protection. [From Template]","**Risk**:Hardcoded plaintext credentials in ECS task definitions allow anyone with read access to the task definition to directly authenticate to the database,bypassing all network-level controls. Absence of least-privilege IAM roles and Object Lock further increases data exposure risk.
+
+**Recommendations**:
+
+1. **Store credentials in AWS Secrets Manager** and reference them in both RDS and ECS:
+```typescript
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+
+const dbSecret = new secretsmanager.Secret(this,'DbSecret',{
+ generateSecretString:{
+ secretStringTemplate:JSON.stringify({username:'admin'}),
+ generateStringKey:'password',
+ excludeCharacters:'""@/',
+},
+});
+
+// In RDS:
+credentials:rds.Credentials.fromSecret(dbSecret),
+
+// In ECS container (removes plaintext env var):
+secrets:{
+ DB_PASS:ecs.Secret.fromSecretsManager(dbSecret,'password'),
+},
+```
+
+2. **Define an explicit ECS Task Role** with least privilege S3 access only:
+```typescript
+import * as iam from 'aws-cdk-lib/aws-iam';
+const taskRole = new iam.Role(this,'TaskRole',{
+ assumedBy:new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+});
+bucket.grantReadWrite(taskRole);
+dbSecret.grantRead(taskRole);
+```
+
+3. **Add an S3 Bucket Policy** to restrict access to only the ECS task role and deny all other principals.
+
+4. **Enable S3 Object Lock** (in GOVERNANCE or COMPLIANCE mode) on buckets containing critical or regulated data to prevent deletion or overwriting.
+
+5. **Enforce MFA Delete on the S3 bucket** to require multi-factor authentication before permanently deleting object versions."
+"Security","How do you protect your data in transit?","Implement secure key and certificate management","Yes","No","[From Template] No ACM certificate is provisioned or referenced anywhere in the CDK stack. The ALB only has an HTTP listener on port 80 with no SSL/TLS certificate attached. There is no AWS Certificate Manager resource,no private CA,and no certificate management of any kind defined in the template.","**Risk**:Without proper certificate management,data transmitted between clients and the ALB is unencrypted. Expired or self-signed certificates increase the risk of man-in-the-middle attacks and may cause service outages.
+
+**Recommendations**:
+
+1. **Provision an ACM Certificate**:Use AWS Certificate Manager to issue and manage a public TLS certificate for your ALB domain. ACM handles automated renewal,eliminating manual certificate rotation risks.
+
+```typescript
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+
+const certificate = new acm.Certificate(this,'SiteCert',{
+ domainName:'app.example.com',
+ validation:acm.CertificateValidation.fromDns(),
+});
+```
+
+2. **Attach the certificate to the ALB HTTPS listener**:
+```typescript
+const httpsListener = alb.addListener('HttpsListener',{
+ port:443,
+ protocol:elbv2.ApplicationProtocol.HTTPS,
+ certificates:[certificate],
+ sslPolicy:elbv2.SslPolicy.RECOMMENDED_TLS,
+});
+```
+
+3. **Enable CloudTrail** to audit certificate access and configure log file integrity validation.
+
+4. For internal service-to-service communication,consider **AWS Private CA** to issue certificates within your VPC.
+
+5. Avoid self-signed certificates for public-facing resources and ensure certificate expiry is monitored via CloudWatch alarms on ACM certificate expiration days."
+"Security","How do you protect your data in transit?","Enforce encryption in transit","Yes","No","[From Template] The ALB is configured with only an HTTP listener on port 80 — explicitly noted in the code as a gap ('Gap:HTTP listener without HTTPS redirect'). There is no HTTPS listener,no HTTP-to-HTTPS redirect,no S3 bucket policy enforcing HTTPS-only access,and no RDS SSL enforcement configured.","**Risk**:Unencrypted HTTP traffic exposes user data and credentials to interception. Sensitive data including database credentials (which are already hardcoded in environment variables) could be captured in transit. This may also violate compliance requirements such as GDPR.
+
+**Recommendations**:
+
+1. **Replace the HTTP listener with HTTPS and add an HTTP redirect**:
+```typescript
+// HTTP redirect to HTTPS
+alb.addListener('HttpRedirect',{
+ port:80,
+ defaultAction:elbv2.ListenerAction.redirect({
+ protocol:'HTTPS',
+ port:'443',
+ permanent:true,
+}),
+});
+
+// HTTPS listener with ACM certificate
+const httpsListener = alb.addListener('HttpsListener',{
+ port:443,
+ protocol:elbv2.ApplicationProtocol.HTTPS,
+ certificates:[certificate],
+ sslPolicy:elbv2.SslPolicy.RECOMMENDED_TLS,
+});
+httpsListener.addTargets('AppTarget',{port:80,targets:[service]});
+```
+
+2. **Enforce HTTPS on the S3 bucket** via a bucket policy:
+```typescript
+bucket.addToResourcePolicy(new iam.PolicyStatement({
+ effect:iam.Effect.DENY,
+ principals:[new iam.AnyPrincipal()],
+ actions:['s3:*'],
+ resources:[bucket.bucketArn,`${bucket.bucketArn}/*`],
+ conditions:{Bool:{'aws:SecureTransport':'false'}},
+}));
+```
+
+3. **Enforce SSL on the RDS instance** by setting the `ssl-ca` parameter via a parameter group,and ensure the application connects using `sslmode=require`.
+
+4. Use **modern TLS policies** (e.g.,`ELBSecurityPolicy-TLS13-1-2-2021-06`) on the ALB to prevent use of deprecated SSL/TLS versions.
+
+5. Use **AWS Config rules** such as `alb-http-to-https-redirection-check` to detect and remediate non-compliant listeners."
+"Security","How do you protect your data in transit?","Authenticate network communications","Yes","No","[From Template] While security groups provide basic network-level isolation (the database security group restricts access to the ECS service on port 5432),there is no application-layer authentication implemented. No mTLS is configured on the ALB,no IAM task roles with fine-grained permissions are defined,and the database uses hardcoded static credentials rather than certificate-based or role-based authentication.","**Risk**:Relying solely on network-layer controls (security groups) without application-layer authentication means that any compromised workload within the VPC could communicate freely with other services. Static credentials increase the risk of unauthorized access if credentials are leaked.
+
+**Recommendations**:
+
+1. **Define an explicit ECS Task Role** with least-privilege IAM permissions for service-to-service authentication:
+```typescript
+import * as iam from 'aws-cdk-lib/aws-iam';
+
+const taskRole = new iam.Role(this,'TaskRole',{
+ assumedBy:new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+});
+bucket.grantRead(taskRole);
+const taskDef = new ecs.FargateTaskDefinition(this,'TaskDef',{
+ taskRole,
+ memoryLimitMiB:1024,
+ cpu:512,
+});
+```
+
+2. **Use AWS Secrets Manager for database credentials** instead of static passwords,and authenticate using IAM database authentication for RDS:
+```typescript
+credentials:rds.Credentials.fromGeneratedSecret('admin'),
+iamAuthentication:true,
+```
+
+3. **Implement mTLS on the ALB** for mutual authentication between clients and the load balancer using AWS Private CA and ALB's native mTLS support.
+
+4. **Use AWS PrivateLink** for internal service communications to keep traffic off the public internet and enforce authenticated,private connectivity.
+
+5. **Apply SigV4 signing** for all AWS API calls made by the application,leveraging the task IAM role credentials automatically provided to Fargate tasks.
+
+6. Regularly audit and rotate all certificates and credentials used for network authentication."
+"Security","How do you anticipate, respond to, and recover from incidents?","Identify key personnel and external resources","No","No","",""
+"Security","How do you anticipate, respond to, and recover from incidents?","Develop incident management plans","No","No","",""
+"Security","How do you anticipate, respond to, and recover from incidents?","Prepare forensic capabilities","Yes","No","[From Template] VPC Flow Logs are explicitly commented out as a gap. No AWS CloudTrail,AWS Config,or AWS Backup resources are defined. There is no forensics account structure,no automated forensic collection tooling,and no centralized log archival. RDS backup retention is set to 7 days,which provides minimal forensic data,but there is no comprehensive forensic readiness posture.","**Risk**:Without pre-prepared forensic capabilities,incident responders will be unable to collect,examine,and analyze evidence during an active security event,significantly increasing time-to-resolution and risk of incomplete remediation.
+
+**Recommendations**:
+
+1. **Enable VPC Flow Logs**:Uncomment and implement VPC Flow Logs to capture network traffic metadata. In CDK:`vpc.addFlowLog('FlowLog',{destination:ec2.FlowLogDestination.toCloudWatchLogs()})`.
+
+2. **Enable AWS CloudTrail**:Add an `aws_cloudtrail.Trail` resource to record all API activity across the account — this is the primary data source for forensic investigation in AWS.
+
+3. **Enable AWS Config**:Deploy `aws_config.ManagedRule` and a Config recorder to capture configuration state changes over time,enabling timeline reconstruction after an incident.
+
+4. **Enhance Backup Coverage with AWS Backup**:Define an `aws_backup.BackupPlan` covering RDS,S3,and ECS data volumes to ensure forensic snapshots can be taken and preserved independently from production systems.
+
+5. **Establish a Forensics Account Structure**:Use AWS Organizations to create a dedicated Forensics OU containing a log archival account and a forensics account. Pre-create these accounts before an incident,as provisioning during an active event is too slow.
+
+6. **Centralize Log Archival**:Configure CloudWatch Logs,CloudTrail,and VPC Flow Logs to forward to a dedicated log archival S3 bucket in a security account with restrictive policies to prevent tampering.
+
+7. **Enable RDS Enhanced Monitoring and Performance Insights**:These provide additional forensic data about database-level activity during a suspected compromise.
+
+Reference:AWS Automated Forensics Orchestrator for Amazon EC2 (GitHub) and the AWS Security Incident Response Guide."
+"Security","How do you anticipate, respond to, and recover from incidents?","Develop and test security incident response playbooks","No","No","",""
+"Security","How do you anticipate, respond to, and recover from incidents?","Pre-provision access","Yes","No","[From Template] No IAM roles scoped for incident response are defined in the template. Database credentials are hardcoded as plaintext (`rds.Credentials.fromPassword` with `SecretValue.plainText`),and the container environment variables include the database password in plaintext — both are significant anti-patterns. There are no break glass accounts,no MFA configurations,and no AWS STS temporary credential mechanisms for incident responders.","**Risk**:Without pre-provisioned,scoped incident response access,responders may resort to using root accounts or ad-hoc IAM permission changes during an active incident. This obscures audit trails,increases blast radius,and may leave elevated permissions in place after the incident. Hardcoded credentials also mean that rotating access post-incident requires code changes and redeployments.
+
+**Recommendations**:
+
+1. **Remove Hardcoded Credentials Immediately**:Replace `rds.Credentials.fromPassword('admin',SecretValue.plainText(...))` with `rds.Credentials.fromGeneratedSecret('admin')` to use AWS Secrets Manager. Remove the `DB_PASS` plaintext environment variable from the container definition and use Secrets Manager references via `container.addSecret()`.
+
+2. **Create Dedicated Incident Response IAM Roles**:Define purpose-built IAM roles scoped to the minimum permissions needed for investigation tasks (e.g.,read access to CloudTrail,S3,CloudWatch Logs,RDS snapshots). These roles should be defined in a dedicated security account.
+
+3. **Implement Just-In-Time (JIT) Privilege Escalation**:Use AWS STS `AssumeRole` with session policies to grant temporary,scoped access during incidents. Credentials should expire automatically after a defined period.
+
+4. **Configure Break Glass Access**:Pre-create individually named IAM users in a dedicated security account (not managed through federation/SSO) with MFA enforced and long-term credentials stored securely offline. This ensures access when the primary IdP is unavailable.
+
+5. **Enforce MFA on All Incident Response Accounts**:Apply IAM condition keys (`aws:MultiFactorAuthPresent`) in role trust and permission policies.
+
+6. **Separate the Security Tooling Account**:Incident response users and roles should reside in a dedicated AWS security account,isolated from the workload account,to prevent blast radius during a workload compromise."
+"Security","How do you anticipate, respond to, and recover from incidents?","Run simulations","No","No","",""
+"Security","How do you anticipate, respond to, and recover from incidents?","Establish a framework for learning from incidents","No","No","",""
+"Security","How do you anticipate, respond to, and recover from incidents?","Pre-deploy tools","Yes","No","[From Template] No Amazon GuardDuty,AWS Security Hub,Amazon Inspector,or AWS Config resources are defined. VPC Flow Logs are commented out as an explicit gap. The single CloudWatch CPU alarm has no alarm actions (no SNS topic configured),meaning alerts are silent. There are no ALB 5xx alarms,DB connection alarms,or dashboards. No Lambda/Step Functions for automated response,no AWS WAF,and no AWS Systems Manager Incident Manager are present.","**Risk**:Without pre-deployed detection and response tools,security incidents may go undetected for extended periods,and responders will have no automated triage capability. Attempting to deploy investigative tools during an active incident wastes critical response time and may not be possible if credentials or infrastructure are compromised.
+
+**Recommendations**:
+
+1. **Enable Amazon GuardDuty**:Add a `aws_guardduty.CfnDetector` resource with `enable:true`. GuardDuty continuously monitors for malicious activity and automatically updates its threat intelligence. This is one of the highest-value,lowest-effort security tools available.
+
+2. **Enable AWS Security Hub**:Centralize security findings from GuardDuty,Inspector,and Config into a single pane of glass using `aws_securityhub.CfnHub`.
+
+3. **Enable Amazon Inspector**:Automate vulnerability scanning of the ECS Fargate workloads and container images using `aws_inspector2` constructs.
+
+4. **Enable AWS Config**:Deploy a Config recorder and managed rules to continuously assess resource compliance and detect configuration drift (e.g.,public S3 bucket,unencrypted RDS,security group changes).
+
+5. **Add CloudWatch Alarm Actions**:Create an SNS topic and wire it to the existing `cpuAlarm` and add missing alarms for ALB 5xx errors,RDS connection counts,and ECS task failures. Example:`cpuAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(alarmTopic))`.
+
+6. **Enable ALB Access Logging**:Set `accessLogs:{bucket:logsBucket}` on the ALB to capture all HTTP request data for forensic and operational analysis.
+
+7. **Deploy AWS WAF on the ALB**:Associate an `aws_wafv2.CfnWebACL` with the ALB to detect and block common web attack patterns (SQLi,XSS,DDoS).
+
+8. **Create a CloudWatch Dashboard**:Define a `cloudwatch.Dashboard` aggregating ECS,ALB,RDS,and S3 metrics for rapid situational awareness during incidents.
+
+9. **Set Up Automated Response with Lambda/Step Functions**:Pre-deploy Lambda functions triggered by GuardDuty findings via EventBridge rules to automatically isolate compromised resources,rotate credentials,or notify on-call personnel."
+"Security","How do you incorporate and validate the security properties of applications throughout the design, development, and deployment lifecycle?","Perform regular penetration testing","No","No","",""
+"Security","How do you incorporate and validate the security properties of applications throughout the design, development, and deployment lifecycle?","Deploy software programmatically","Yes","Yes","[From Template] The entire infrastructure is defined using AWS CDK (TypeScript),a programmatic Infrastructure as Code tool. All resources — VPC,RDS,ECS Fargate,ALB,S3,and CloudWatch — are declared as code in the WebAppStack class,enabling consistent and repeatable deployments. The use of CDK constructs (e.g.,`new ec2.Vpc`,`new ecs.FargateService`) demonstrates a programmatic approach to infrastructure management rather than manual console-based provisioning.",""
+"Security","How do you incorporate and validate the security properties of applications throughout the design, development, and deployment lifecycle?","Regularly assess security properties of the pipelines","Yes","No","[From Template] No CI/CD pipeline infrastructure is defined in the template (no CodePipeline,CodeBuild,CodeDeploy,or equivalent). There are no IAM roles with least-privilege policies scoped to pipeline stages,no secrets management for pipeline credentials,no pipeline monitoring or alerting,and no audit logging configurations. Additionally,database credentials are hardcoded directly in the CDK code (`DB_PASS:'Pr0duction_Pass!'`),which is a critical anti-pattern for pipeline security.","**Risk**:Without a defined and regularly assessed CI/CD pipeline,there are no controls preventing unauthorized deployments,no audit trail of deployment activity,and credentials may be exposed in source code or pipeline logs — all of which can lead to supply chain attacks or unauthorized access.
+
+**Recommendations**:
+
+1. **Define a CI/CD pipeline**:Use AWS CodePipeline with CodeBuild stages for build,test,and deploy. Store all pipeline definitions as code alongside the CDK stack.
+
+2. **Eliminate hardcoded credentials**:The template hardcodes `DB_PASS:'Pr0duction_Pass!'` in both the RDS credentials and the ECS container environment variables. Replace these with AWS Secrets Manager references:
+ ```typescript
+ const dbSecret = new secretsmanager.Secret(this,'DbSecret',{...});
+ credentials:rds.Credentials.fromSecret(dbSecret),
+ ```
+ Then inject into ECS using `secrets` instead of `environment`.
+
+3. **Apply least-privilege IAM to pipeline roles**:Scope CodeBuild and CodePipeline service roles to only the permissions required for each stage. Use IAM Access Analyzer to identify overly permissive policies.
+
+4. **Monitor pipeline activity**:Route CodePipeline events to Amazon EventBridge and configure alerts via SNS for unexpected pipeline executions,failures,or unauthorized changes.
+
+5. **Enable CloudTrail**:Ensure AWS CloudTrail is capturing API calls for all pipeline-related services (CodePipeline,CodeBuild,ECR) to enable forensic analysis.
+
+6. **Enforce separation of duties**:Ensure that developers who write application code cannot self-approve and deploy to production without a separate review/approval stage in the pipeline."
+"Security","How do you incorporate and validate the security properties of applications throughout the design, development, and deployment lifecycle?","Train for application security","No","No","",""
+"Security","How do you incorporate and validate the security properties of applications throughout the design, development, and deployment lifecycle?","Automate testing throughout the development and release lifecycle","Yes","No","[From Template] No automated security testing tooling or pipeline stages are defined anywhere in the template. There is no integration with SAST tools (e.g.,Amazon CodeGuru Security),no DAST configuration,no CloudFormation Guard rules for IaC security validation,and no CodePipeline or CodeBuild resources that would indicate a CI/CD pipeline with security scanning stages. The use of `nginx:latest` without image vulnerability scanning further evidences the absence of automated security checks.","**Risk**:Without automated security testing in the development and release lifecycle,security vulnerabilities (e.g.,SQL injection,insecure dependencies,misconfigurations) may reach production undetected. The identified hardcoded password (`Pr0duction_Pass!`) and HTTP-only ALB listener are examples of issues that automated tools should catch before deployment.
+
+**Recommendations**:
+
+1. **Integrate SAST with Amazon CodeGuru Security**:Add CodeGuru Security to your CodeBuild stage to automatically scan source code for vulnerabilities such as hardcoded secrets and injection flaws. This would have flagged the hardcoded `DB_PASS` during development.
+
+2. **Add IaC security scanning with CloudFormation Guard (cfn-guard) or cdk-nag**:
+ ```bash
+ npm install cdk-nag
+ ```
+ Apply `AwsSolutionsChecks` in your CDK app to automatically detect issues like HTTP listeners,missing encryption,or permissive security groups at synthesis time.
+
+3. **Enable Amazon ECR image scanning**:Instead of pulling `nginx:latest` from Docker Hub,push versioned images to ECR with scan-on-push enabled:
+ ```typescript
+ const repo = new ecr.Repository(this,'AppRepo',{
+ imageScanOnPush:true,
+});
+ ```
+
+4. **Implement dependency vulnerability scanning**:Use Amazon Inspector or tools like OWASP Dependency-Check integrated into CodeBuild to scan Node.js/TypeScript dependencies for known CVEs.
+
+5. **Define security unit tests**:Write CDK test assertions (using `aws-cdk-lib/assertions`) that validate critical security properties — e.g.,that no security group allows unrestricted inbound traffic,that storage encryption is enabled,and that no plaintext secrets exist in task definitions.
+
+6. **Add DAST post-deployment**:Integrate a DAST tool into a post-deployment CodePipeline stage targeting the ALB endpoint to test the running application for vulnerabilities such as those identified by OWASP Top 10."
+"Security","How do you incorporate and validate the security properties of applications throughout the design, development, and deployment lifecycle?","Conduct code reviews","No","No","",""
+"Security","How do you incorporate and validate the security properties of applications throughout the design, development, and deployment lifecycle?","Centralize services for packages and dependencies","Yes","No","[From Template] The ECS container image is pulled directly from the public Docker Hub registry using `ecs.ContainerImage.fromRegistry('nginx:latest')` with a mutable `:latest` tag. No Amazon ECR private repository,AWS CodeArtifact,or any other centralized artifact management service is defined. There is no image vulnerability scanning (via ECR scan-on-push or Amazon Inspector),no version pinning,and no mechanism to vet or approve third-party packages before use.","**Risk**:Pulling images directly from public registries with `:latest` tags exposes the workload to supply chain attacks (a malicious actor compromising the public image),unexpected breaking changes when the image is updated,and unpatched vulnerabilities that would go undetected without scanning. This is especially critical for a production ECS service.
+
+**Recommendations**:
+
+1. **Use Amazon ECR as a private container registry**:Create a private ECR repository and push vetted,versioned application images to it rather than pulling directly from Docker Hub:
+ ```typescript
+ const repo = new ecr.Repository(this,'AppRepo',{
+ imageScanOnPush:true,
+ imageTagMutability:ecr.TagMutability.IMMUTABLE,
+});
+ image:ecs.ContainerImage.fromEcrRepository(repo,'v1.2.3'),
+ ```
+
+2. **Pin to specific,immutable image tags**:Replace `nginx:latest` with a specific digest or semantic version (e.g.,`nginx:1.25.3`) to ensure deterministic deployments and prevent unexpected updates.
+
+3. **Enable ECR scan-on-push**:Enable `imageScanOnPush:true` on the ECR repository so that every pushed image is automatically scanned for OS-level CVEs using Amazon Inspector,with findings surfaced in the AWS Console and via EventBridge.
+
+4. **Use AWS CodeArtifact for package dependencies**:If the application uses npm,Maven,or pip packages,configure CodeArtifact as an upstream proxy to public registries. This allows your security team to block vulnerable package versions before they are consumed by developers:
+ ```bash
+ aws codeartifact create-repository --domain my-domain --repository npm-store
+ ```
+
+5. **Implement ECR lifecycle policies**:Define lifecycle rules on ECR repositories to automatically expire untagged or old images,reducing the attack surface from stale artifacts.
+
+6. **Monitor for new vulnerabilities in deployed images**:Enable Amazon Inspector v2 container image scanning to continuously monitor running ECS tasks for newly disclosed CVEs,not just at push time."
+"Security","How do you incorporate and validate the security properties of applications throughout the design, development, and deployment lifecycle?","Build a program that embeds security ownership in workload teams","No","No","",""
