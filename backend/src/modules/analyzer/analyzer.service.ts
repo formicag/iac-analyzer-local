@@ -131,21 +131,12 @@ export class AnalyzerService {
 CRITICAL ASSESSMENT RULES:
 1. Be STRICT when determining "applied". A best practice is ONLY "applied" if it is FULLY and COMPLETELY implemented, not partially.
 2. If the code has a basic construct but is MISSING complementary services, monitoring, or security controls that the best practice requires, mark it as "applied": false.
-3. Pay close attention to code COMMENTS that say "Gap:", "TODO:", "not configured", or similar — these are explicit acknowledgements of missing implementations. If a gap comment exists for a practice, it is NOT applied.
-4. Having a resource DEFINED is not the same as having a best practice APPLIED. Common traps to avoid:
+3. Pay close attention to code COMMENTS that say "Gap:", "TODO:", or "not configured" — these are explicit acknowledgements of missing implementations. If a gap comment exists for a practice, it is NOT applied.
+4. Having a resource DEFINED is not the same as having a best practice APPLIED. For example:
    - Setting encryption on RDS but NOT on EBS volumes = "Enforce encryption at rest" is NOT fully applied
    - Having a CPU alarm with NO alarm actions (no SNS topic) = "Collect metrics" is NOT fully applied
    - Using IaC (CDK/Terraform) alone does NOT mean "Automate security controls" is applied — you need actual security automation services (Config rules, GuardDuty, Inspector, etc.)
    - Having security groups does NOT mean "Automate compute protection" is applied — you need vulnerability scanning, patch management, etc.
-   - Having a VPC with subnets does NOT mean "Choose location based on network requirements" — you need evidence of latency analysis, CloudFront, Global Accelerator, etc.
-   - Having security groups controlling traffic does NOT mean "Control traffic within network layers" if there is no HTTPS, no WAF, or overly permissive rules
-   - Using Fargate/managed services does NOT fully satisfy "Reduce manual management" if IMDSv2 is not enforced, SSM is not configured, etc.
-   - Selecting a specific instance type does NOT mean "Right-size compute" — you need evidence of data-driven sizing or cost analysis
-   - Having VPC subnets does NOT mean "Evaluate available networking features" — you need CloudFront, Global Accelerator, enhanced networking, etc.
-   - Having S3 versioning does NOT mean "Track resources over lifetime" — you need tagging strategy, TTL, decommissioning tags
-   - Using ECS Fargate does NOT mean "Select best compute options" without documented rationale or evaluation
-   - A circuit breaker does NOT mean "Implement buffer/throttle" — you need SQS, API Gateway throttling, or Kinesis
-   - Having access control on some resources but not all (e.g. S3 BlockPublicAccess but no bucket policies, no IAM restrictions) = "Enforce access control" is NOT fully applied
 5. When in doubt, mark as "applied": false with a recommendation. It is better to flag a potential gap than to miss it.
 6. RELEVANCE: Be careful with "relevant": false. A best practice IS relevant if it COULD be implemented in the code, even if it's an organizational practice. Only mark "relevant": false if the practice is truly impossible to assess or implement from any IaC perspective. When in doubt about relevance, mark it as relevant and not applied.
 
