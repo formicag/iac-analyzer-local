@@ -100,6 +100,33 @@ What I'm trying to demonstrate here is that with tools like Claude Code, we can 
 
 The trade-off is speed (2 hours vs minutes for a full review), but it's free, private, and available to everyone. For a tool that's meant to be kicked off and checked later, that's a reasonable trade-off.
 
+## Why we can't run the AWS version on our work account
+
+The original AWS IaC Analyzer uses Claude (Anthropic) on Amazon Bedrock. I tested deploying it to our Colibri Digital AWS partner account, but Anthropic models are **not available on AWS Channel Partner accounts**. When attempting to invoke any Claude model, Bedrock returns:
+
+> *"Access to this model is not available for channel program accounts. Reach out to your AWS Solution Provider or AWS Distributor for more information."*
+
+This is a licensing restriction — AWS Channel Partner Program accounts (like ours) don't have access to third-party foundation models (Anthropic, Cohere, Meta, etc.) through the standard Bedrock on-demand pricing. Access requires either a separate agreement with the model provider or using a non-partner AWS account.
+
+I tested the full AWS deployment on a personal AWS account where Claude is available, and confirmed the results are comparable to our local Gemma 4 version. The local version avoids this licensing issue entirely since Gemma 4 is open-source and runs on your own hardware.
+
+## Prerequisites comparison
+
+| | **Local version (ours)** | **AWS version (original)** |
+|---|---|---|
+| **Node.js** | Required | Required |
+| **Ollama** | Required | Not needed |
+| **Docker** | **Not required** | Required (for CDK deployment) |
+| **AWS Account** | Not needed | Required (with Bedrock access) |
+| **Bedrock model access** | Not needed | Required (Claude — not available on partner accounts) |
+| **Running cost** | Free | ~$10-15/day (S3 Vectors) or ~$80/day (OpenSearch) |
+
+## Platform compatibility
+
+- **Mac**: Fully tested and supported
+- **Linux / Ubuntu**: Works — uses bash, Node.js, and Ollama (all available on Linux)
+- **Windows**: Not directly supported (setup.sh is bash). Would work via WSL2 (Windows Subsystem for Linux)
+
 Happy to walk anyone through the setup or answer questions.
 
 Cheers,
