@@ -138,6 +138,7 @@ CRITICAL ASSESSMENT RULES:
    - Using IaC (CDK/Terraform) alone does NOT mean "Automate security controls" is applied — you need actual security automation services (Config rules, GuardDuty, Inspector, etc.)
    - Having security groups does NOT mean "Automate compute protection" is applied — you need vulnerability scanning, patch management, etc.
 5. When in doubt, mark as "applied": false with a recommendation. It is better to flag a potential gap than to miss it.
+6. RELEVANCE: Be careful with "relevant": false. A best practice IS relevant if it COULD be implemented in the code, even if it's an organizational practice. Only mark "relevant": false if the practice is truly impossible to assess or implement from any IaC perspective. When in doubt about relevance, mark it as relevant and not applied.
 
 CRITICAL OUTPUT RULES:
 - You MUST respond ONLY with a JSON object wrapped in <json_response> tags.
